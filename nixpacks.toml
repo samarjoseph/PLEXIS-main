@@ -1,0 +1,7 @@
+providers = ["python"]
+
+[phases.install]
+cmds = ["cd backend && python -m pip install -r requirements.txt"]
+
+[start]
+cmd = "cd backend && waitress-serve --port=$PORT run:app"
