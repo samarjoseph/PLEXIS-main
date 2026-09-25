@@ -1,0 +1,11 @@
+name,age,salary,department,hire_date,is_active
+Alice,30,75000.50,Engineering,2020-01-15,True
+Bob,25,62000.00,Marketing,2021-06-01,True
+Charlie,35,88000.75,Engineering,2019-03-20,False
+Diana,28,71000.00,Sales,2022-01-10,True
+Eve,,65000.25,Marketing,,True
+Frank,42,95000.00,Engineering,2018-07-15,False
+Grace,31,78000.50,,2020-11-01,True
+Henry,27,60000.00,Sales,2023-02-28,True
+Iris,33,82000.00,Engineering,2019-09-15,
+Jack,29,68000.75,Marketing,2021-12-01,True

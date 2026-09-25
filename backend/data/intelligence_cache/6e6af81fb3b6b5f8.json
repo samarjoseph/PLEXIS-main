@@ -1,0 +1,866 @@
+{
+  "fingerprint": "6e6af81fb3b6b5f8",
+  "dataset_name": "sample-10000-rows.csv",
+  "analyzed_at": "2026-08-05T02:53:32.583737+00:00",
+  "row_count": 10000,
+  "column_count": 6,
+  "memory_usage_bytes": 2803275,
+  "versions": {
+    "engine_version": "1.0.0",
+    "dko_schema_version": "2.0.0",
+    "knowledge_graph_version": "1.0.0",
+    "semantic_model_version": "1.0.0",
+    "observation_engine_version": "1.0.0"
+  },
+  "identity": {
+    "probable_purpose": "General Purpose",
+    "primary_entities": [],
+    "business_concepts": [],
+    "overall_readiness": "excellent",
+    "kpis": [
+      "age"
+    ],
+    "strongest_groupings": []
+  },
+  "observations": [
+    {
+      "observation": "Dataset is exceptionally clean and analysis-ready.",
+      "category": "Quality",
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "Quality score > 90",
+        "lineage": "Quality Engine"
+      }
+    }
+  ],
+  "columns": {
+    "id": {
+      "name": "id",
+      "position": 0,
+      "dtype_raw": "int64",
+      "dtype_category": "integer",
+      "role": "Identifier",
+      "semantic_type": "id_integer",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 10000,
+      "unique_pct": 100.0,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": {
+        "min": 1.0,
+        "max": 10000.0,
+        "mean": 5000.5,
+        "median": 5000.5,
+        "mode": 1.0,
+        "variance": 8334166.666667,
+        "std": 2886.89568,
+        "q1": 2500.75,
+        "q3": 7500.25,
+        "iqr": 4999.5,
+        "p5": 500.95,
+        "p95": 9500.05,
+        "range": 9999.0,
+        "skewness": 0.0,
+        "kurtosis": -1.2,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 10000,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values",
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Identifier based on type integer",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "name": {
+      "name": "name",
+      "position": 1,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 9984,
+      "unique_pct": 99.84,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 9984,
+        "top_values": [
+          [
+            "Anna Dibbert",
+            2
+          ],
+          [
+            "Janet Roberts",
+            2
+          ],
+          [
+            "Frank Stracke",
+            2
+          ],
+          [
+            "Caleb Hegmann",
+            2
+          ],
+          [
+            "Hannah Thompson III",
+            2
+          ],
+          [
+            "Clifford Terry",
+            2
+          ],
+          [
+            "Laura Stroman",
+            2
+          ],
+          [
+            "Winona Hoppe",
+            2
+          ],
+          [
+            "Orville Bergnaum",
+            2
+          ],
+          [
+            "Sandy Prohaska",
+            2
+          ]
+        ],
+        "rare_values": [
+          "Anna Dibbert",
+          "Janet Roberts",
+          "Frank Stracke",
+          "Caleb Hegmann",
+          "Hannah Thompson III",
+          "Clifford Terry",
+          "Laura Stroman",
+          "Winona Hoppe",
+          "Orville Bergnaum",
+          "Sandy Prohaska",
+          "Margie Ziemann",
+          "Lester Konopelski",
+          "Adrienne Gottlieb",
+          "Donnie Langworth",
+          "Fredrick Auer",
+          "Carol Rohan",
+          "Madeline Stark",
+          "Winston Olson",
+          "Dominick Kuphal",
+          "Lauren Heller"
+        ],
+        "dominant_value": "Anna Dibbert",
+        "dominant_pct": 0.02,
+        "entropy": 13.2845,
+        "is_high_cardinality": true
+      },
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "email": {
+      "name": "email",
+      "position": 2,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 9986,
+      "unique_pct": 99.86,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 9986,
+        "top_values": [
+          [
+            "Bonnie56@example.org",
+            2
+          ],
+          [
+            "Sherry28@example.net",
+            2
+          ],
+          [
+            "Jaylon80@example.net",
+            2
+          ],
+          [
+            "Micheal9@example.com",
+            2
+          ],
+          [
+            "Allen62@example.org",
+            2
+          ],
+          [
+            "Maudie15@example.com",
+            2
+          ],
+          [
+            "Allan84@example.net",
+            2
+          ],
+          [
+            "Jaylin12@example.com",
+            2
+          ],
+          [
+            "Moses_Dooley@example.com",
+            2
+          ],
+          [
+            "Jackie94@example.org",
+            2
+          ]
+        ],
+        "rare_values": [
+          "Bonnie56@example.org",
+          "Sherry28@example.net",
+          "Jaylon80@example.net",
+          "Micheal9@example.com",
+          "Allen62@example.org",
+          "Maudie15@example.com",
+          "Allan84@example.net",
+          "Jaylin12@example.com",
+          "Moses_Dooley@example.com",
+          "Jackie94@example.org",
+          "Naomi22@example.com",
+          "Sue78@example.com",
+          "Guillermo22@example.net",
+          "Derrick45@example.org",
+          "Cedric45@example.net",
+          "Jakob_Heller16@example.com",
+          "Juana37@example.org",
+          "Gwendolyn_Legros18@example.com",
+          "Arturo45@example.net",
+          "Mason34@example.org"
+        ],
+        "dominant_value": "Bonnie56@example.org",
+        "dominant_pct": 0.02,
+        "entropy": 13.2849,
+        "is_high_cardinality": true
+      },
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "city": {
+      "name": "city",
+      "position": 3,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Geographic",
+      "semantic_type": "unknown",
+      "business_meaning": "city_dimension",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 8503,
+      "unique_pct": 85.03,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 8503,
+        "top_values": [
+          [
+            "Pleasanton",
+            8
+          ],
+          [
+            "Clearwater",
+            7
+          ],
+          [
+            "Palm Desert",
+            7
+          ],
+          [
+            "Parma",
+            7
+          ],
+          [
+            "Peabody",
+            7
+          ],
+          [
+            "Pensacola",
+            6
+          ],
+          [
+            "Rowlett",
+            6
+          ],
+          [
+            "Fishers",
+            6
+          ],
+          [
+            "Blue Springs",
+            6
+          ],
+          [
+            "Pinellas Park",
+            6
+          ]
+        ],
+        "rare_values": [
+          "Pleasanton",
+          "Clearwater",
+          "Palm Desert",
+          "Parma",
+          "Peabody",
+          "Pensacola",
+          "Rowlett",
+          "Fishers",
+          "Blue Springs",
+          "Pinellas Park",
+          "Melbourne",
+          "Pasco",
+          "Elyria",
+          "Euclid",
+          "Miami Beach",
+          "Oceanside",
+          "Centreville",
+          "Ocala",
+          "Alexandria",
+          "Greenwood"
+        ],
+        "dominant_value": "Pleasanton",
+        "dominant_pct": 0.08,
+        "entropy": 12.9218,
+        "is_high_cardinality": true
+      },
+      "datetime_stats": null,
+      "characteristics": [],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Geographic based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "phone": {
+      "name": "phone",
+      "position": 4,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 10000,
+      "unique_pct": 100.0,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 10000,
+        "top_values": [
+          [
+            "1-729-840-8669 x72331",
+            1
+          ],
+          [
+            "796-522-5962 x7528",
+            1
+          ],
+          [
+            "(519) 297-3848 x5145",
+            1
+          ],
+          [
+            "587.894.1764 x86679",
+            1
+          ],
+          [
+            "(219) 618-6941 x60386",
+            1
+          ],
+          [
+            "(414) 972-5752",
+            1
+          ],
+          [
+            "243-913-4794",
+            1
+          ],
+          [
+            "(674) 527-8167 x59267",
+            1
+          ],
+          [
+            "(458) 950-6747 x002",
+            1
+          ],
+          [
+            "(996) 523-5163 x890",
+            1
+          ]
+        ],
+        "rare_values": [
+          "1-729-840-8669 x72331",
+          "796-522-5962 x7528",
+          "(519) 297-3848 x5145",
+          "587.894.1764 x86679",
+          "(219) 618-6941 x60386",
+          "(414) 972-5752",
+          "243-913-4794",
+          "(674) 527-8167 x59267",
+          "(458) 950-6747 x002",
+          "(996) 523-5163 x890",
+          "871-721-8339",
+          "649-334-9209 x6565",
+          "1-497-496-9622 x8876",
+          "1-787-529-6408 x553",
+          "(316) 332-4073",
+          "1-523-642-0805 x1927",
+          "(958) 310-6182",
+          "1-592-310-0999",
+          "810-494-2542 x821",
+          "241.406.7772 x114"
+        ],
+        "dominant_value": "1-729-840-8669 x72331",
+        "dominant_pct": 0.01,
+        "entropy": 13.2877,
+        "is_high_cardinality": true
+      },
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "age": {
+      "name": "age",
+      "position": 5,
+      "dtype_raw": "int64",
+      "dtype_category": "integer",
+      "role": "Metric",
+      "semantic_type": "numeric_general",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 48,
+      "unique_pct": 0.48,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 18.0,
+        "max": 65.0,
+        "mean": 41.4011,
+        "median": 41.0,
+        "mode": 44.0,
+        "variance": 192.367656,
+        "std": 13.869667,
+        "q1": 29.0,
+        "q3": 54.0,
+        "iqr": 25.0,
+        "p5": 20.0,
+        "p95": 63.0,
+        "range": 47.0,
+        "skewness": 0.012768,
+        "kurtosis": -1.220257,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 10000,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as Metric based on type integer",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    }
+  },
+  "analytical_groups": [],
+  "knowledge_graph": {
+    "hierarchies": [],
+    "dependencies": [],
+    "groupings": [],
+    "correlations": []
+  },
+  "opportunities": [
+    {
+      "name": "aggregation",
+      "description": "Supports aggregation analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "ranking",
+      "description": "Supports ranking analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "grouping",
+      "description": "Supports grouping analysis.",
+      "required_columns": [
+        "city",
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "comparison",
+      "description": "Supports comparison analysis.",
+      "required_columns": [
+        "city",
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "distribution",
+      "description": "Supports distribution analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "geographic",
+      "description": "Supports geographic analysis.",
+      "required_columns": [
+        "city",
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "kpi_tracking",
+      "description": "Supports kpi_tracking analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "title": "Dataset has 1 metric(s), 1 dimension(s)",
+      "description": "Found 1 quantitative metric column(s) (age) and 1 categorical dimension(s) (city).",
+      "severity": "positive",
+      "category": "schema",
+      "affected_columns": [
+        "age",
+        "city"
+      ],
+      "evidence": {
+        "metric_count": 1,
+        "dimension_count": 1
+      },
+      "recommendation": null,
+      "importance_score": 7.0
+    },
+    {
+      "title": "Excellent data quality (score: 100/100)",
+      "description": "The dataset is clean, complete, and ready for analysis with minimal preparation needed.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.0
+    },
+    {
+      "title": "High analytical potential: 7 analysis types available",
+      "description": "The dataset supports 7 different analysis types including: aggregation, ranking, grouping, comparison, distribution.",
+      "severity": "positive",
+      "category": "capability",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.0
+    },
+    {
+      "title": "'id' spans a very wide value range",
+      "description": "'id' ranges from 1.00 to 10,000.00 (ratio: 10,000x). Log scaling may improve readability in visualizations.",
+      "severity": "low",
+      "category": "statistical",
+      "affected_columns": [
+        "id"
+      ],
+      "evidence": {
+        "min": 1.0,
+        "max": 10000.0,
+        "ratio": 10000.0
+      },
+      "recommendation": "Consider log scale for charts involving this column.",
+      "importance_score": 2.0
+    },
+    {
+      "title": "'name' has no missing values",
+      "description": "'name' is 100% complete across all 10,000 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "name"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    },
+    {
+      "title": "'email' has no missing values",
+      "description": "'email' is 100% complete across all 10,000 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "email"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    },
+    {
+      "title": "'city' has no missing values",
+      "description": "'city' is 100% complete across all 10,000 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "city"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    },
+    {
+      "title": "'phone' has no missing values",
+      "description": "'phone' is 100% complete across all 10,000 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "phone"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    }
+  ],
+  "predicted_questions": [
+    {
+      "question": "What are the top 10 records by age?",
+      "category": "ranking",
+      "confidence": 0.95,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the total age?",
+      "category": "aggregation",
+      "confidence": 0.9,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "Compare age by city",
+      "category": "comparison",
+      "confidence": 0.9,
+      "relevant_columns": [
+        "age",
+        "city"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the average age?",
+      "category": "aggregation",
+      "confidence": 0.85,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "What is the lowest age in the dataset?",
+      "category": "ranking",
+      "confidence": 0.8,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the distribution of age?",
+      "category": "distribution",
+      "confidence": 0.75,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "histogram"
+    }
+  ],
+  "quality_report": {
+    "overall_score": 100.0,
+    "completeness_score": 100.0,
+    "consistency_score": 100.0,
+    "uniqueness_score": 100.0,
+    "issues": [
+      {
+        "issue_type": "high_cardinality",
+        "severity": "low",
+        "affected_columns": [
+          "name"
+        ],
+        "description": "'name' has very high cardinality (9984 unique values) \u2014 may not be suitable as a grouping dimension.",
+        "recommendation": "Consider bucketing 'name' into fewer categories for aggregation.",
+        "impact_score": 1.5
+      },
+      {
+        "issue_type": "high_cardinality",
+        "severity": "low",
+        "affected_columns": [
+          "email"
+        ],
+        "description": "'email' has very high cardinality (9986 unique values) \u2014 may not be suitable as a grouping dimension.",
+        "recommendation": "Consider bucketing 'email' into fewer categories for aggregation.",
+        "impact_score": 1.5
+      },
+      {
+        "issue_type": "high_cardinality",
+        "severity": "low",
+        "affected_columns": [
+          "city"
+        ],
+        "description": "'city' has very high cardinality (8503 unique values) \u2014 may not be suitable as a grouping dimension.",
+        "recommendation": "Consider bucketing 'city' into fewer categories for aggregation.",
+        "impact_score": 1.5
+      },
+      {
+        "issue_type": "high_cardinality",
+        "severity": "low",
+        "affected_columns": [
+          "phone"
+        ],
+        "description": "'phone' has very high cardinality (10000 unique values) \u2014 may not be suitable as a grouping dimension.",
+        "recommendation": "Consider bucketing 'phone' into fewer categories for aggregation.",
+        "impact_score": 1.5
+      }
+    ],
+    "duplicate_row_count": 0,
+    "duplicate_row_pct": 0.0,
+    "total_missing_cells": 0,
+    "total_missing_pct": 0.0,
+    "columns_with_issues": [
+      "email",
+      "city",
+      "phone",
+      "name"
+    ],
+    "analysis_readiness": "excellent"
+  },
+  "domain": {
+    "domain": "General Purpose",
+    "confidence": 1.0,
+    "evidence": [
+      "No strong domain signals detected."
+    ],
+    "secondary_domain": null
+  },
+  "presentation": {
+    "presentation": "",
+    "version": "1.0",
+    "model_used": "",
+    "generated_at": "",
+    "generated_by": "llm"
+  }
+}

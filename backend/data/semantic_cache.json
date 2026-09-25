@@ -1,0 +1,67 @@
+{
+  "74fdc34ea7ab6a3f5d22a718ebf2e907b018cfb83cf0a763de09a5c633e40bbd": {
+    "dataset_name": "74fdc34ea7ab6a3f5d22a718ebf2e907b018cfb83cf0a763de09a5c633e40bbd",
+    "domain": "Generic",
+    "columns": {
+      "id": {
+        "name": "id",
+        "role": "Identifier",
+        "concept": null,
+        "description": null,
+        "is_primary_metric": false,
+        "is_primary_date": false
+      },
+      "name": {
+        "name": "name",
+        "role": "Attribute",
+        "concept": null,
+        "description": null,
+        "is_primary_metric": false,
+        "is_primary_date": false
+      },
+      "email": {
+        "name": "email",
+        "role": "Identifier",
+        "concept": null,
+        "description": null,
+        "is_primary_metric": false,
+        "is_primary_date": false
+      },
+      "city": {
+        "name": "city",
+        "role": "Dimension",
+        "concept": "city_dimension",
+        "description": null,
+        "is_primary_metric": false,
+        "is_primary_date": false
+      },
+      "phone": {
+        "name": "phone",
+        "role": "Attribute",
+        "concept": null,
+        "description": null,
+        "is_primary_metric": false,
+        "is_primary_date": false
+      },
+      "age": {
+        "name": "age",
+        "role": "Metric",
+        "concept": "age_metric",
+        "description": null,
+        "is_primary_metric": true,
+        "is_primary_date": false
+      }
+    },
+    "derived_metrics": [],
+    "relationships": {
+      "metrics_to_dimensions": {
+        "age": [
+          "city"
+        ]
+      },
+      "metrics_to_time": {
+        "age": []
+      }
+    }
+  }
+}

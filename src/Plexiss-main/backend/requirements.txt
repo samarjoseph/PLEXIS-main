@@ -1,0 +1,8 @@
+flask>=3.0
+flask-cors>=5.0
+python-dotenv>=1.0
+pandas>=2.0
+numpy>=1.24
+google-generativeai>=0.8
+requests>=2.31
+openpyxl>=3.1

@@ -1,0 +1,191 @@
+{
+  "dataset_id": "cd4beb50-ba6d-4a7a-ac2a-0380716a6aff",
+  "dataset_fingerprint": "e39c4cba3aeb5090",
+  "dataset_name": "sample-100-rows.csv",
+  "status": "complete",
+  "section_groups": [
+    {
+      "group_id": "ddf7ef82-3468-4820-9b3e-1aabe4e12b13",
+      "group_title": "id Analysis",
+      "sections": [
+        {
+          "section_id": "d1fc381d-4e0b-492c-a5d3-e1746958f145",
+          "section_type": "identifier",
+          "group_title": "id Analysis",
+          "title": "Identifier Quality \u2014 id",
+          "interpretation": "All identifiers are unique and present, so each record can be reliably distinguished from every other record. This guarantees that downstream processes that rely on unique keys will not encounter duplicate or missing values.",
+          "evidence_ids": [
+            "8a05e308-d288-486a-a643-cb82ba6261b9"
+          ],
+          "data": {
+            "column": "id",
+            "row_count": 100,
+            "unique_count": 100,
+            "duplicate_count": 0,
+            "missing_count": 0,
+            "uniqueness_pct": 100.0,
+            "is_clean": true,
+            "finding_text": "All 100 identifiers are unique and non-missing."
+          },
+          "priority": 5,
+          "flagged": false,
+          "source_candidate_ids": [
+            "identifier_quality__id"
+          ]
+        }
+      ],
+      "synthesis_insight": {
+        "related_candidate_ids": [
+          "identifier_quality__id",
+          "missingness_analysis"
+        ],
+        "relationship_type": "contextual",
+        "synthesis_text": "Unique identifiers complement the completeness claim, ensuring each record is distinct and fully populated.",
+        "confidence": 0.5
+      }
+    },
+    {
+      "group_id": "943ec50d-cc03-4487-813c-2757ca4b3f59",
+      "group_title": "age Analysis",
+      "sections": [
+        {
+          "section_id": "30613a36-9d68-4471-9a50-18025bb0fe8f",
+          "section_type": "statistics",
+          "group_title": "age Analysis",
+          "title": "age Statistics",
+          "interpretation": "The age data shows a fairly balanced distribution, with the average and middle values nearly aligned, suggesting no strong bias toward younger or older ages. The spread is moderate, and the small amount of missing entries indicates a largely complete dataset.",
+          "evidence_ids": [
+            "f8bcbe0a-d51b-4cf4-a899-a7cd13fe1cd3"
+          ],
+          "data": {
+            "column": "age",
+            "valid_count": 98,
+            "missing_count": 2,
+            "missing_pct": 2.0,
+            "mean": 41.0918,
+            "median": 40.5,
+            "std": 14.2468,
+            "min": 18.0,
+            "q1": 29.0,
+            "q3": 54.0,
+            "max": 65.0,
+            "skewness": 0.0558,
+            "kurtosis": -1.2502,
+            "range_min": 18.0,
+            "range_max": 65.0
+          },
+          "priority": 10,
+          "flagged": false,
+          "source_candidate_ids": [
+            "summary_statistics__age"
+          ]
+        },
+        {
+          "section_id": "21e6294c-f57f-40b6-8d6d-0535e4f1bf18",
+          "section_type": "distribution",
+          "group_title": "age Analysis",
+          "title": "age Distribution",
+          "interpretation": "The ages are centered near the middle of the range with a slight rightward tilt, and the most frequent group lies in the 27.4\u201132.1 bracket, showing a relatively flat spread across the bins. With only two missing values, the dataset is largely complete.",
+          "evidence_ids": [
+            "26c2489e-977a-4fd6-9f49-94ea398c6d52"
+          ],
+          "data": {
+            "column": "age",
+            "counts": [
+              12,
+              7,
+              18,
+              4,
+              10,
+              7,
+              8,
+              12,
+              11,
+              9
+            ],
+            "bins": [
+              18.0,
+              22.7,
+              27.4,
+              32.1,
+              36.8,
+              41.5,
+              46.2,
+              50.9,
+              55.6,
+              60.300000000000004,
+              65.0
+            ],
+            "skewness": 0.0558,
+            "kurtosis": -1.2502,
+            "modal_bin_label": "27.4-32.1",
+            "modal_bin_count": 18,
+            "valid_count": 98,
+            "missing_count": 2,
+            "mean": 41.09,
+            "median": 40.5,
+            "std": 14.25,
+            "min": 18.0,
+            "max": 65.0
+          },
+          "priority": 30,
+          "flagged": false,
+          "source_candidate_ids": [
+            "distribution__age"
+          ]
+        }
+      ],
+      "synthesis_insight": {
+        "related_candidate_ids": [
+          "missingness_analysis",
+          "distribution__age"
+        ],
+        "relationship_type": "contextual",
+        "synthesis_text": "While the overall dataset shows no missing values, the age column has two missing entries, indicating a column\u2011specific exception.",
+        "confidence": 0.5
+      }
+    },
+    {
+      "group_id": "f18cc3a0-992b-4a6c-8c48-0b6ed7e2d594",
+      "group_title": "Data Quality",
+      "sections": [
+        {
+          "section_id": "c2fb0753-d27c-41d1-b843-04971012ef8b",
+          "section_type": "missingness",
+          "group_title": "Data Quality",
+          "title": "Missing Data",
+          "interpretation": "The dataset contains no missing values, meaning every row and column is fully populated. This indicates data completeness and reduces the need for imputation.",
+          "evidence_ids": [
+            "533eb807-48ea-4ab6-8f30-a5f1d102d2d3"
+          ],
+          "data": {
+            "column_missing_summary": [],
+            "missing_row_indices": [],
+            "total_missing_cells": 0
+          },
+          "priority": 70,
+          "flagged": false,
+          "source_candidate_ids": [
+            "missingness_analysis"
+          ]
+        }
+      ],
+      "synthesis_insight": {
+        "related_candidate_ids": [
+          "missingness_analysis",
+          "distribution__age"
+        ],
+        "relationship_type": "contextual",
+        "synthesis_text": "While the overall dataset shows no missing values, the age column has two missing entries, indicating a column\u2011specific exception.",
+        "confidence": 0.5
+      }
+    }
+  ],
+  "synthesis_text": "The dataset is fully populated and uniquely keyed, with only a couple of missing age entries that do not materially affect the overall balanced age distribution, as confirmed by both distribution and summary statistics.",
+  "total_investigations": 4,
+  "successful_investigations": 4,
+  "failed_investigations": 0,
+  "complexity_tier": "normal",
+  "generated_at": "2026-09-22T14:49:14.852734+00:00",
+  "llm_planner_model": "default"
+}

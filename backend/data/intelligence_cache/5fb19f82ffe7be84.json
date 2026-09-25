@@ -1,0 +1,299 @@
+{
+  "fingerprint": "5fb19f82ffe7be84",
+  "dataset_name": "test.csv",
+  "analyzed_at": "2026-08-05T05:37:49.243648+00:00",
+  "row_count": 2,
+  "column_count": 2,
+  "memory_usage_bytes": 164,
+  "versions": {
+    "engine_version": "1.0.0",
+    "dko_schema_version": "2.0.0",
+    "knowledge_graph_version": "1.0.0",
+    "semantic_model_version": "1.0.0",
+    "observation_engine_version": "1.0.0"
+  },
+  "identity": {
+    "probable_purpose": "General Purpose",
+    "primary_entities": [],
+    "business_concepts": [],
+    "overall_readiness": "excellent",
+    "kpis": [
+      "age"
+    ],
+    "strongest_groupings": []
+  },
+  "observations": [
+    {
+      "observation": "Dataset is exceptionally clean and analysis-ready.",
+      "category": "Quality",
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "Quality score > 90",
+        "lineage": "Quality Engine"
+      }
+    }
+  ],
+  "columns": {
+    "id": {
+      "name": "id",
+      "position": 0,
+      "dtype_raw": "int64",
+      "dtype_category": "integer",
+      "role": "Identifier",
+      "semantic_type": "id_integer",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "unique_pct": 100.0,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 1.0,
+        "max": 2.0,
+        "mean": 1.5,
+        "median": 1.5,
+        "mode": 1.0,
+        "variance": 0.5,
+        "std": 0.707107,
+        "q1": 1.25,
+        "q3": 1.75,
+        "iqr": 0.5,
+        "p5": 1.05,
+        "p95": 1.95,
+        "range": 1.0,
+        "skewness": null,
+        "kurtosis": null,
+        "skewness_label": "unknown",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 2,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "unknown_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Identifier based on type integer",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "age": {
+      "name": "age",
+      "position": 1,
+      "dtype_raw": "int64",
+      "dtype_category": "integer",
+      "role": "Metric",
+      "semantic_type": "numeric_general",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "unique_pct": 100.0,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 25.0,
+        "max": 30.0,
+        "mean": 27.5,
+        "median": 27.5,
+        "mode": 25.0,
+        "variance": 12.5,
+        "std": 3.535534,
+        "q1": 26.25,
+        "q3": 28.75,
+        "iqr": 2.5,
+        "p5": 25.25,
+        "p95": 29.75,
+        "range": 5.0,
+        "skewness": null,
+        "kurtosis": null,
+        "skewness_label": "unknown",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 2,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "unknown_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as Metric based on type integer",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    }
+  },
+  "analytical_groups": [],
+  "knowledge_graph": {
+    "hierarchies": [],
+    "dependencies": [],
+    "groupings": [],
+    "correlations": []
+  },
+  "opportunities": [
+    {
+      "name": "aggregation",
+      "description": "Supports aggregation analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "ranking",
+      "description": "Supports ranking analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "distribution",
+      "description": "Supports distribution analysis.",
+      "required_columns": [
+        "age"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "title": "Dataset has 1 metric(s), 0 dimension(s)",
+      "description": "Found 1 quantitative metric column(s) (age) and 0 categorical dimension(s) ().",
+      "severity": "positive",
+      "category": "schema",
+      "affected_columns": [
+        "age"
+      ],
+      "evidence": {
+        "metric_count": 1,
+        "dimension_count": 0
+      },
+      "recommendation": null,
+      "importance_score": 7.0
+    },
+    {
+      "title": "No categorical dimensions detected",
+      "description": "The dataset lacks categorical columns for grouping. Comparison and segmentation analyses will be limited.",
+      "severity": "high",
+      "category": "schema",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": "Add categorical columns (e.g., Region, Category, Status) to enable group-by analysis.",
+      "importance_score": 6.0
+    },
+    {
+      "title": "Excellent data quality (score: 100/100)",
+      "description": "The dataset is clean, complete, and ready for analysis with minimal preparation needed.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.0
+    }
+  ],
+  "predicted_questions": [
+    {
+      "question": "What are the top 10 records by age?",
+      "category": "ranking",
+      "confidence": 0.95,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the total age?",
+      "category": "aggregation",
+      "confidence": 0.9,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "What is the average age?",
+      "category": "aggregation",
+      "confidence": 0.85,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "What is the lowest age in the dataset?",
+      "category": "ranking",
+      "confidence": 0.8,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the distribution of age?",
+      "category": "distribution",
+      "confidence": 0.75,
+      "relevant_columns": [
+        "age"
+      ],
+      "suggested_chart": "histogram"
+    }
+  ],
+  "quality_report": {
+    "overall_score": 100.0,
+    "completeness_score": 100.0,
+    "consistency_score": 100.0,
+    "uniqueness_score": 100.0,
+    "issues": [],
+    "duplicate_row_count": 0,
+    "duplicate_row_pct": 0.0,
+    "total_missing_cells": 0,
+    "total_missing_pct": 0.0,
+    "columns_with_issues": [],
+    "analysis_readiness": "excellent"
+  },
+  "domain": {
+    "domain": "General Purpose",
+    "confidence": 1.0,
+    "evidence": [
+      "No strong domain signals detected."
+    ],
+    "secondary_domain": null
+  },
+  "presentation": {
+    "presentation": "",
+    "version": "1.0",
+    "model_used": "",
+    "generated_at": "",
+    "generated_by": "llm"
+  }
+}

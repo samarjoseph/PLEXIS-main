@@ -1,0 +1,1284 @@
+# RFC-002: Plexis Intelligence Presentation Architecture v2.0
+### Modular Knowledge Architecture — Executive-First, Semantically Decomposed, Token-Optimal
+
+**Status:** PROPOSED  
+**Author:** Lead AI Systems Architect  
+**Date:** 2026-08-05  
+**Supersedes:** RFC-001 (Monolithic Presentation Architecture v1.0)
+
+---
+
+## Table of Contents
+
+1. Executive Summary
+2. Problem Statement
+3. Core Philosophy
+4. High-Level Architecture
+5. Complete Data Flow
+6. Module Responsibilities
+7. PresentationContextBuilder Redesign
+8. Semantic Importance Ranking Architecture
+9. Knowledge Module Architecture
+10. JSON Schemas
+11. Interaction Flow
+12. Frontend Component Architecture
+13. LLM Responsibility Boundaries
+14. Token Optimization Strategy
+15. Why This Architecture Is Superior
+16. Scalability Considerations
+17. Future Extensibility
+18. Folder Structure
+19. Example Outputs
+20. Architecture Diagrams
+21. API Contracts
+22. Implementation Phases
+23. Appendix A — Design Decision Log
+
+---
+
+## 1. Executive Summary
+
+Plexis v1.0 has a working intelligence pipeline. The Dataset Intelligence Engine (DIE) already produces an extremely rich, deterministic Dataset Knowledge Object (DKO). The bottleneck is not intelligence generation — **the bottleneck is knowledge delivery**.
+
+The current `PresentationContextBuilder` acts as a shallow JSON serializer. It compresses everything into one prompt, sends it to the LLM, and gets back one wall of text. This creates three compounding failure modes:
+
+1. **Token waste** — The LLM receives statistics it does not need to narrate
+2. **Burial problem** — Critical facts are buried among irrelevant ones
+3. **Information loss** — The frontend receives text instead of structured knowledge
+
+This RFC proposes a **Modular Knowledge Architecture** where:
+
+- The DKO is semantically decomposed into named, typed **Knowledge Modules**
+- A **Semantic Importance Ranker** scores and prioritizes every fact
+- Only **Executive Facts** (top 20-25 facts) reach the primary LLM
+- All remaining modules are held in a **Module Registry** and served on-demand
+- The frontend renders structured data as **components**, not prose
+
+The result: numbers live in tables, insights live in language, every interaction is maximally efficient.
+
+---
+
+## 2. Problem Statement
+
+### 2.1 The Monolithic Prompt Problem
+
+The v1.0 architecture sends a single, large JSON blob to the LLM:
+
+```
+build_context(dko) -> 1 JSON string -> 1 prompt -> 1 LLM response -> 1 markdown blob
+```
+
+| Problem | Root Cause | Effect |
+|---------|-----------|--------|
+| Generic responses | All facts have equal weight | LLM cannot determine what is important |
+| Token inefficiency | All statistics included | Up to 3,000 unnecessary tokens |
+| Information burial | No priority ordering | Critical anomalies missed |
+| Static output | Single rendering pass | No drill-down, no expansion |
+| Lost intelligence | Valuable DKO fields never reach LLM | User never sees rare values, outlier detail |
+| No interactivity | One-shot markdown | Frontend cannot selectively reveal intelligence |
+
+### 2.2 What the DKO Contains That Never Reaches Users
+
+All of the following are currently discarded by the presentation layer:
+
+- Full NumericStats: variance, std deviation, kurtosis, P5/P95, IQR, outlier_pct
+- Full CategoricalStats: entropy, rare_values, top 20 dominant values
+- Full DatetimeStats: has_gaps, year/month distributions, granularity
+- RelationshipMap: foreign_key_candidates, target_candidates, time-metric pairs
+- QualityReport: per-column issue breakdown, consistency and completeness scores
+- PredictedQuestions: the 5-10 most likely user questions
+- CapabilitySet: supporting_columns per capability
+- All DataInsights beyond the top 5
+
+### 2.3 The Frontend Rendering Problem
+
+The frontend receives a markdown blob rendered by a markdown parser. This approach cannot sort or filter intelligence, render interactive tables, animate individual stats, expand/collapse sections, support click-driven drill-down, or provide search within intelligence.
+
+---
+
+## 3. Core Philosophy
+
+**Principle 1: Intelligence is Permanent.** The DKO is immutable. Nothing is discarded after Stage 10. All 200+ facts are preserved in the Module Registry indefinitely.
+
+**Principle 2: Delivery is Prioritized.** The Semantic Importance Ranker determines which facts are most valuable for the specific dataset. The ranker adapts — not all datasets have correlations or time series.
+
+**Principle 3: The LLM is a Communicator, Not a Reporter.** The LLM produces insight language — the human interpretation of patterns. It should never narrate numbers. Numbers belong in components. Interpretations belong in prose.
+
+**Principle 4: Components Over Prose.** A `mean: 41.4` never belongs in a paragraph. It belongs in a StatisticsCard. A strong correlation belongs in a RelationshipCard with a visual indicator.
+
+**Principle 5: One DKO, Many Views.** The DKO is analyzed once. Every subsequent interaction reads from the already-computed Module Registry — no re-analysis, no re-prompting.
+
+---
+
+## 4. High-Level Architecture
+
+```
+DATASET INTELLIGENCE ENGINE (Stages 1-10, Deterministic)
+                    |
+                    | DatasetKnowledgeObject (DKO, Immutable)
+                    v
+           KNOWLEDGE DECOMPOSER
+    (Reads DKO, produces 12 typed modules)
+                    |
+                    | KnowledgeBundle
+                    v
+         SEMANTIC IMPORTANCE RANKER
+  (Scores every fact, 5-factor weighted model)
+           /                      \
+          v                        v
+   EXECUTIVE FACTS           MODULE REGISTRY
+   (top 25 facts)          (all 12 modules cached)
+          |                        |
+          v                        | on-demand
+   PRESENTATION LLM         MODULE EXPLANATION LLM
+   (Groq primary,          (same pool, one module)
+    Gemini fallback)                |
+          |                        v
+          v                  MODULE SSE STREAM
+   MARKDOWN STREAM
+          |
+          v
+       FRONTEND
+  NarrativePanel | ModuleCards (lazy-loaded)
+  Streaming text | StatisticsCard, QualityCard,
+  LLM narrative  | RelationshipCard, ColumnCard...
+```
+
+---
+
+## 5. Complete Data Flow
+
+### 5.1 Upload Flow
+
+```
+1. User uploads dataset
+2. DIE Stages 1-10 run -> DKO produced
+3. KnowledgeDecomposer.decompose(dko) -> KnowledgeBundle
+   - 12 Knowledge Modules instantiated, each with structured typed data
+4. SemanticImportanceRanker.rank(bundle) ->
+   - Every fact receives an importance_score (0-100)
+   - ExecutiveFacts[] assembled from top-scored facts (max 25)
+   - Each module receives a module_richness_score
+5. ModuleRegistry.store(session_id, bundle) -> in-memory cache
+6. PresentationEngine.stream_executive(executive_facts) ->
+   - AIRequest: ONLY executive_facts (~700 tokens, vs 2500+ in v1.0)
+   - LLM generates primary Markdown narrative (streaming)
+   - SSE: event: chunk
+7. SSE: event: done, data: {dataset_info, available_modules}
+8. Frontend renders:
+   - Primary narrative (streaming text)
+   - Module cards from structured JSON (NO LLM needed)
+```
+
+### 5.2 Module Drill-Down Flow
+
+```
+1. User clicks "Hidden Patterns" card
+2. Frontend: GET /api/datasets/active/modules/patterns/explain
+3. Backend:
+   a. ModuleRegistry.get(session_id, "patterns") -> PatternsModule
+   b. ModuleExplainer.explain_stream(module)
+      - AIRequest: ONLY patterns module (~300 tokens)
+   c. SSE stream back to frontend
+4. Frontend: renders LLM explanation inline in expanded card
+```
+
+### 5.3 Chat Flow
+
+```
+1. User asks: "Which cities have the highest average age?"
+2. ContextCompiler builds context from:
+   a. ExecutiveFacts (always included - dataset identity)
+   b. Relevant modules (geographic, relationships, statistical)
+   c. Conversation history
+3. Planner receives the enriched context
+4. Response streamed back
+```
+
+---
+
+## 6. Module Responsibilities
+
+### 6.1 KnowledgeDecomposer
+
+**Single Responsibility:** Transform a DKO into a typed, named KnowledgeBundle.
+
+- **Inputs:** DatasetKnowledgeObject
+- **Outputs:** KnowledgeBundle
+- **LLM calls:** None. 100% deterministic.
+- **Location:** `backend/presentation/knowledge_decomposer.py`
+- **Rules:** Never modifies the DKO. Never throws. No overlapping data between modules.
+
+### 6.2 SemanticImportanceRanker
+
+**Single Responsibility:** Score every extractable fact for its presentation importance.
+
+- **Inputs:** KnowledgeBundle, DatasetKnowledgeObject
+- **Outputs:** RankedKnowledgeBundle, ExecutiveFacts[]
+- **LLM calls:** None. 100% deterministic.
+- **Location:** `backend/presentation/importance_ranker.py`
+
+Scoring formula:
+```python
+fact_score = (
+    anomaly_weight      * is_anomalous      # 0.30
+    domain_weight       * domain_relevance  # 0.25
+    completeness_weight * data_presence     # 0.20
+    magnitude_weight    * effect_size       # 0.15
+    novelty_weight      * unexpectedness    # 0.10
+)
+```
+
+### 6.3 PresentationEngine (Redesigned)
+
+**Single Responsibility:** Primary narrative LLM call using only ExecutiveFacts.
+
+- **Inputs:** ExecutiveFacts[], DatasetIdentity
+- **Outputs:** Generator[str] (SSE stream)
+- **LLM calls:** 1 (primary presentation, ~700 tokens max)
+- **Location:** `backend/presentation/presentation_engine.py`
+
+### 6.4 ModuleRegistry
+
+**Single Responsibility:** Store and retrieve KnowledgeBundles per session.
+
+- **Inputs:** session_id, KnowledgeBundle
+- **Outputs:** Individual modules by name
+- **LLM calls:** None.
+- **Location:** `backend/presentation/module_registry.py`
+
+### 6.5 ModuleExplainer
+
+**Single Responsibility:** Generate LLM explanations for individual modules on demand.
+
+- **Inputs:** KnowledgeModule, user_query (optional)
+- **Outputs:** Generator[str] (SSE stream)
+- **LLM calls:** 1 per module expansion (~300-500 tokens)
+- **Location:** `backend/presentation/module_explainer.py`
+
+---
+
+## 7. PresentationContextBuilder Redesign
+
+### 7.1 v1.0 (Current — Rejected)
+
+```python
+# Sends everything to LLM as a single blob
+def build_context(dko):
+    return json.dumps({
+        "metadata": {...},
+        "column_profiles": [...],   # ALL columns
+        "relationships": {...},     # ALL correlations
+        "insights": [...],          # ALL insights
+        "opportunities": [...]      # ALL capabilities
+    })
+# Result: 2,500-5,000 tokens. LLM overwhelmed. Generic output.
+```
+
+### 7.2 v2.0 (Proposed — Three-Component Pipeline)
+
+```python
+class KnowledgeDecomposer:
+    def decompose(self, dko: DatasetKnowledgeObject) -> KnowledgeBundle:
+        return KnowledgeBundle(
+            executive    = self._build_executive_module(dko),
+            quality      = self._build_quality_module(dko),
+            statistics   = self._build_statistics_module(dko),
+            columns      = self._build_column_module(dko),
+            relations    = self._build_relationship_module(dko),
+            patterns     = self._build_patterns_module(dko),
+            rare         = self._build_rare_observations_module(dko),
+            distribution = self._build_distribution_module(dko),
+            insights     = self._build_insights_module(dko),
+            viz          = self._build_visualization_module(dko),
+            semantic     = self._build_semantic_module(dko),
+            questions    = self._build_questions_module(dko),
+        )
+
+class SemanticImportanceRanker:
+    def rank(self, bundle: KnowledgeBundle, dko) -> ExecutiveSummary:
+        all_facts = self._extract_all_facts(bundle)
+        scored    = self._score_facts(all_facts, dko)
+        executive = sorted(scored, key=lambda f: f.score, reverse=True)[:25]
+        return ExecutiveSummary(facts=executive, bundle=bundle)
+
+class PresentationEngine:
+    def stream(self, summary: ExecutiveSummary) -> Generator[str]:
+        prompt = self._build_executive_prompt(summary.facts)
+        # ~600-900 tokens max — not 2,500+
+        yield from provider_engine.generate_stream(AIRequest(
+            task="presentation",
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=PRESENTATION_SYSTEM_PROMPT,
+            max_tokens=1024,
+        ))
+```
+
+### 7.3 ExecutiveFact Dataclass
+
+```python
+@dataclass
+class ExecutiveFact:
+    category:      str            # quality|scale|metric|anomaly|relationship|opportunity
+    title:         str            # Human-readable label
+    value:         Any            # The fact (number, string, list)
+    unit:          Optional[str]  # %, rows, columns, None
+    score:         float          # 0-100 importance score
+    is_anomalous:  bool           # Is this surprising?
+    source_module: str            # Which module owns this fact
+    context:       str            # 1-line human-readable context for the LLM
+```
+
+---
+
+## 8. Semantic Importance Ranking Architecture
+
+### 8.1 Fact Extraction Sources
+
+| Module | Extractable Facts |
+|--------|------------------|
+| QualityModule | overall_score, missing_pcts, duplicate_rate, issue_severities |
+| StatisticsModule | outlier_pcts, extreme_skewness, unusual_ranges |
+| RelationshipModule | correlation_strengths, grouping_power_scores |
+| ColumnModule | high_null_cols, constant_cols, identifier_misclassifications |
+| RareModule | rare_value_pcts, anomalous_values, singleton_values |
+| InsightsModule | pre-scored DataInsights (importance_score from DIE) |
+| DistributionModule | bimodal_detection, long_tail, concentration_ratios |
+
+### 8.2 Scoring Weights
+
+```python
+SCORING_WEIGHTS = {
+    "anomaly_score":      0.30,  # Is this fact unusual?
+    "domain_relevance":   0.25,  # Does domain knowledge elevate this?
+    "data_presence":      0.20,  # Is it backed by sufficient data?
+    "effect_size":        0.15,  # Is the magnitude meaningful?
+    "novelty":            0.10,  # Would a user be surprised?
+}
+```
+
+### 8.3 Domain-Aware Boosting
+
+| Domain | Boosted Fact Types |
+|--------|--------------------|
+| Retail/Sales | Revenue metrics, top products, seasonality patterns |
+| HR | Attrition rate, headcount by department |
+| Finance | Margins, cost outliers, transaction anomalies |
+| Healthcare | Missing diagnosis codes, patient age distributions |
+| Education | Grade distributions, completion rates |
+| General | Data quality, schema completeness, uniqueness |
+
+### 8.4 Executive Fact Budget
+
+```
+Maximum facts:           25
+Minimum guaranteed:      10
+Category distribution:
+  Quality facts:         2-3   (always present)
+  Scale facts:           1-2   (always present)
+  KPI/metric facts:      2-4   (if metrics exist)
+  Anomaly facts:         0-5   (highest priority when present)
+  Relationship facts:    0-4   (if correlations exist)
+  Opportunity facts:     1-2   (always present)
+  Domain-specific:       0-5   (domain-aware)
+```
+
+---
+
+## 9. Knowledge Module Architecture
+
+### 9.1 The Twelve Modules
+
+| Module ID | Display Name | Source in DKO | Always Present |
+|-----------|-------------|---------------|----------------|
+| `executive` | Executive Summary | Ranked cross-module facts | YES |
+| `quality` | Data Quality Report | dko.quality | YES |
+| `statistics` | Statistical Details | dko.column_stats (numeric) | If numeric cols |
+| `columns` | Column Intelligence | dko.columns + column_stats | YES |
+| `relationships` | Relationships | dko.relationships | If 2+ cols |
+| `patterns` | Hidden Patterns | Derived from stats + insights | Conditional |
+| `rare` | Rare Observations | dko.column_stats categorical | Conditional |
+| `distribution` | Distribution Intelligence | dko.column_stats numeric | If numeric |
+| `insights` | Interesting Facts | dko.insights | YES |
+| `viz` | Visualization Suggestions | dko.capabilities + semantics | YES |
+| `semantic` | Semantic Summary | dko.semantics + dko.domain | YES |
+| `questions` | Predicted Questions | dko.predicted_questions | YES |
+
+### 9.2 KnowledgeModule Dataclass
+
+```python
+@dataclass
+class KnowledgeModule:
+    module_id:      str
+    display_name:   str
+    icon:           str          # e.g., "chart-bar", "shield-check"
+    richness_score: float        # 0-100; modules < 20 not shown to user
+    fact_count:     int
+    is_available:   bool         # False when DKO has no data for this module
+    data:           Dict[str, Any]
+    preview:        str          # 1-2 sentence deterministic subtitle for card
+```
+
+Modules with `richness_score < 20` are not rendered in the UI. This prevents empty cards for datasets without correlations, without time series, etc.
+
+---
+
+## 10. JSON Schemas
+
+### 10.1 Executive Module
+
+```json
+{
+  "module_id": "executive",
+  "facts": [
+    {
+      "category": "quality|scale|metric|anomaly|relationship|pattern|opportunity",
+      "title": "string",
+      "value": "any",
+      "unit": "string | null",
+      "score": 0.0,
+      "is_anomalous": false,
+      "context": "string"
+    }
+  ],
+  "dataset_identity": {
+    "name": "string",
+    "rows": 0,
+    "columns": 0,
+    "domain": "string",
+    "domain_confidence": 0.0,
+    "readiness": "excellent | good | fair | poor",
+    "readiness_score": 0.0
+  }
+}
+```
+
+### 10.2 Quality Module
+
+```json
+{
+  "module_id": "quality",
+  "overall_score": 94.5,
+  "completeness_score": 98.2,
+  "consistency_score": 91.0,
+  "uniqueness_score": 99.1,
+  "readiness": "excellent",
+  "summary": "string",
+  "duplicate_rows": { "count": 0, "pct": 0.0 },
+  "missing_cells": { "count": 0, "pct": 0.0 },
+  "issues": [
+    {
+      "type": "string",
+      "severity": "critical | high | medium | low",
+      "affected_columns": ["string"],
+      "description": "string",
+      "recommendation": "string",
+      "impact_score": 0.0
+    }
+  ],
+  "column_health": {
+    "column_name": { "null_pct": 0.0, "has_issues": false, "issue_types": [] }
+  }
+}
+```
+
+### 10.3 Statistics Module
+
+```json
+{
+  "module_id": "statistics",
+  "numeric_columns": [
+    {
+      "name": "string",
+      "min": 0.0, "max": 0.0, "mean": 0.0, "median": 0.0,
+      "mode": 0.0, "std": 0.0, "variance": 0.0,
+      "q1": 0.0, "q3": 0.0, "iqr": 0.0,
+      "p5": 0.0, "p95": 0.0,
+      "skewness": 0.0, "skewness_label": "string",
+      "kurtosis": 0.0,
+      "zero_count": 0, "negative_count": 0,
+      "outlier_count": 0, "outlier_pct": 0.0
+    }
+  ]
+}
+```
+
+### 10.4 Column Module
+
+```json
+{
+  "module_id": "columns",
+  "columns": [
+    {
+      "name": "string",
+      "position": 0,
+      "role": "Metric | Dimension | Identifier | Time | Attribute | Geographic",
+      "semantic_type": "string",
+      "importance_score": 0.0,
+      "null_pct": 0.0,
+      "unique_count": 0,
+      "unique_pct": 0.0,
+      "is_primary_metric": false,
+      "is_primary_date": false,
+      "is_constant": false,
+      "is_unique": false,
+      "sample_values": ["string"],
+      "numeric_stats": null,
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "recommendations": ["string"]
+    }
+  ]
+}
+```
+
+### 10.5 Relationship Module
+
+```json
+{
+  "module_id": "relationships",
+  "correlations": [
+    {
+      "col_a": "string", "col_b": "string",
+      "pearson_r": 0.0,
+      "strength": "very_strong | strong | moderate | weak | negligible",
+      "direction": "positive | negative",
+      "interpretation": "string"
+    }
+  ],
+  "grouping_dimensions": [
+    { "column": "string", "controls_metrics": ["string"], "grouping_power": 0.0 }
+  ],
+  "foreign_key_candidates": ["string"],
+  "target_candidates": ["string"],
+  "time_metric_pairs": [{ "time_col": "string", "metric_cols": ["string"] }]
+}
+```
+
+### 10.6 Patterns Module
+
+```json
+{
+  "module_id": "patterns",
+  "patterns": [
+    {
+      "type": "bimodal | long_tail | concentration | periodicity | gap | anomaly_cluster",
+      "column": "string",
+      "description": "string",
+      "evidence": {},
+      "severity": "high | medium | low",
+      "importance_score": 0.0
+    }
+  ]
+}
+```
+
+### 10.7 Rare Observations Module
+
+```json
+{
+  "module_id": "rare",
+  "observations": [
+    {
+      "type": "rare_value | singleton | unusual_combination | extreme_outlier",
+      "column": "string",
+      "value": "any",
+      "frequency": 0,
+      "frequency_pct": 0.0,
+      "description": "string",
+      "importance_score": 0.0
+    }
+  ]
+}
+```
+
+### 10.8 Distribution Module
+
+```json
+{
+  "module_id": "distribution",
+  "distributions": [
+    {
+      "column": "string",
+      "distribution_type": "normal | right_skewed | left_skewed | bimodal | uniform | exponential",
+      "skewness": 0.0,
+      "skewness_label": "string",
+      "kurtosis": 0.0,
+      "range": 0.0,
+      "spread": "tight | moderate | wide",
+      "quartiles": { "q1": 0.0, "q3": 0.0, "iqr": 0.0 },
+      "tail_analysis": { "left_tail_pct": 0.0, "right_tail_pct": 0.0 },
+      "histogram_summary": [{ "bucket": "string", "count": 0 }]
+    }
+  ]
+}
+```
+
+### 10.9 Visualization Module
+
+```json
+{
+  "module_id": "viz",
+  "suggestions": [
+    {
+      "chart_type": "bar | line | scatter | histogram | heatmap | pie | box | treemap",
+      "title": "string",
+      "x_axis": "string | null",
+      "y_axis": "string | null",
+      "group_by": "string | null",
+      "reason": "string",
+      "priority": 1,
+      "capability": "ranking | aggregation | distribution | correlation"
+    }
+  ]
+}
+```
+
+### 10.10 Questions Module
+
+```json
+{
+  "module_id": "questions",
+  "questions": [
+    {
+      "question": "string",
+      "category": "string",
+      "confidence": 0.0,
+      "relevant_columns": ["string"],
+      "suggested_chart": "string | null"
+    }
+  ]
+}
+```
+
+---
+
+## 11. Interaction Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend
+    participant API as Backend API
+    participant MR as ModuleRegistry
+    participant LLM as LLM (Groq/Gemini)
+
+    U->>FE: Upload dataset
+    FE->>API: POST /api/upload
+    API->>API: DIE Stages 1-10 -> DKO
+    API->>API: KnowledgeDecomposer -> Bundle (12 modules)
+    API->>API: ImportanceRanker -> ExecutiveFacts (top 25)
+    API->>MR: store(session_id, bundle)
+    API->>LLM: stream(executive_facts) [~700 tokens]
+    LLM-->>FE: SSE chunk stream (narrative)
+    API-->>FE: SSE done {available_modules}
+    FE->>FE: Render module cards from JSON (no LLM)
+
+    U->>FE: Click "Hidden Patterns" card
+    FE->>API: GET /api/datasets/active/modules/patterns/explain
+    API->>MR: get(session_id, "patterns")
+    MR-->>API: PatternsModule
+    API->>LLM: stream(patterns_module) [~300 tokens]
+    LLM-->>FE: SSE stream (explanation inline in card)
+```
+
+### 11.1 Module API Endpoints
+
+```
+GET  /api/datasets/active/modules                     -> list available modules + richness
+GET  /api/datasets/active/modules/{module_id}          -> raw module JSON
+GET  /api/datasets/active/modules/{module_id}/explain  -> SSE explanation stream
+```
+
+---
+
+## 12. Frontend Component Architecture
+
+### 12.1 Component Tree
+
+```
+PresentationView (root)
++-- NarrativePanel
+|   +-- MarkdownRenderer (streaming text)
+|
++-- ModuleGrid
+    +-- ExecutiveSummaryCard        [always -- non-expandable]
+    +-- StatisticsTableCard         [expandable -> statistics]
+    +-- ColumnIntelligenceCard      [expandable -> columns]
+    +-- DataQualityCard             [expandable -> quality]
+    +-- RelationshipCard            [richness > 20 -> relationships]
+    +-- DistributionCard            [richness > 20 -> distribution]
+    +-- HiddenPatternsCard          [richness > 20 -> patterns]
+    +-- RareObservationsCard        [richness > 20 -> rare]
+    +-- VisualizationSuggestionCard [always visible]
+    +-- PredictedQuestionsCard      [always visible]
+    +-- FullIntelligenceCard        [always -- accordion, raw DKO]
+```
+
+### 12.2 Card Contract
+
+Every card MUST:
+1. Render its structural data **immediately** from module JSON — no LLM required
+2. Show a deterministic one-sentence preview (`module.preview`)
+3. On expand, call the `/explain` SSE endpoint
+4. Stream LLM explanation inline inside the expanded card
+5. Cache the explanation locally — no re-fetch on collapse/expand
+
+### 12.3 StatisticsTableCard (Wire Frame)
+
+```
++------------------------------------------------------------------+
+| Statistical Overview                               [Expand Down] |
++----------+------+------+------+--------+-------+-------+--------+
+| Column   | Min  | Max  | Mean | Median |  Std  | Null% |Outliers|
++----------+------+------+------+--------+-------+-------+--------+
+| Revenue  | 0    | 98K  | 2.4K | 1.8K   | 4.1K  | 0%    | 2.1%  |
+| Quantity | 1    | 500  | 47.2 | 32     | 61.8  | 0%    | 0.8%  |
+| Discount | 0%   | 80%  | 14%  | 10%    | 17%   | 3.2%  | 1.2%  |
++----------+------+------+------+--------+-------+-------+--------+
+[AI Explanation streams here when expanded]
+```
+
+### 12.4 DataQualityCard (Wire Frame)
+
+```
++------------------------------------------------------------------+
+| Data Quality                                        Score: 94%  |
+| ============================================================ 94 |
++--------------------+--------------------------------------------+
+| Completeness       | [================] 98.2%                   |
+| Consistency        | [=============   ] 91.0%                   |
+| Uniqueness         | [================] 99.1%                   |
++--------------------+--------------------------------------------+
+| 2 issues found     | 0 critical issues                          |
++------------------------------------------------------------------+
+```
+
+### 12.5 RelationshipCard (Wire Frame)
+
+```
++------------------------------------------------------------------+
+| Relationships & Correlations                   [3 found] [View] |
++-----------------------+----------+------------------------------+
+| Revenue <-> Quantity  |  r=0.87  | [============] Very Strong  |
+| Revenue <-> Discount  |  r=-0.43 | [======      ] Moderate (-) |
+| Age <-> Salary        |  r=0.31  | [====        ] Weak         |
++-----------------------+----------+------------------------------+
+```
+
+---
+
+## 13. LLM Responsibility Boundaries
+
+> [!IMPORTANT]
+> These are hard architectural contracts. Violation is a regression, not a feature.
+
+### 13.1 LLM MUST Do
+
+- Narrate discoveries in warm, analytical natural language
+- Interpret patterns (e.g., "The revenue skew suggests a small set of high-value customers drive most income")
+- Connect facts into coherent storylines
+- Adapt language register to the detected domain
+- Generate a naturally curious conclusion that invites next questions
+- Explain module content when the user drills down
+
+### 13.2 LLM MUST NOT Do
+
+| Prohibited Behavior | Correct Approach |
+|--------------------|--------------------|
+| State `mean: 41.4` in prose | Render it in StatisticsTableCard |
+| List all column names | Reference ColumnIntelligenceCard |
+| Enumerate every quality issue | Reference DataQualityCard |
+| Repeat what cards already show | Interpret what cards cannot show |
+| Use template headings like "Data Quality Summary:" | Use dynamic, natural language |
+| Output generic closings | End with a specific intriguing observation |
+
+### 13.3 Token Budget Per Call
+
+| Call | System Prompt | Context | Max Output | Total |
+|------|--------------|---------|-----------|-------|
+| Primary presentation | ~300 tokens | ~600 tokens | 1,024 tokens | ~1,974 |
+| Module explanation | ~150 tokens | ~350 tokens | 512 tokens | ~1,042 |
+
+> [!NOTE]
+> v1.0 used 2,500–5,000 input tokens per request. v2.0 uses ~1,974 maximum — a **62% reduction** while delivering superior output quality.
+
+---
+
+## 14. Token Optimization Strategy
+
+### 14.1 The Three Token Laws
+
+**Law 1 — Numbers Are Not Prose.**
+No statistic that can be rendered in a table should appear in the LLM prompt. The LLM receives interpretation context, not raw numbers.
+
+**Law 2 — Facts Are Ranked, Not Included By Default.**
+Every fact competes for a budget slot. Only the top 25 reach the LLM. The ranker decides per dataset — not the engineer.
+
+**Law 3 — Modules Are Lazy.**
+Module explanations are never generated until the user requests them. One dataset = 1 LLM call at upload time. Each card expansion = 1 additional call.
+
+### 14.2 Token Budget vs. Dataset Width
+
+| Dataset Size | Columns | v1.0 Tokens | v2.0 Tokens | Savings |
+|-------------|---------|------------|------------|---------|
+| Small | < 10 | 1,200 | 800 | 33% |
+| Medium | 10–50 | 2,500 | 900 | 64% |
+| Large | 50–200 | 5,000+ | 950 | 81% |
+| Enterprise | 200+ | 15,000+ | 1,000 | **93%** |
+
+### 14.3 Executive Facts Compression Format
+
+Facts are serialized as a structured natural-language bullet list, not raw JSON — 30% more token-efficient:
+
+```
+EXECUTIVE FACTS (25 facts selected from 847 available):
+
+SCALE
+- 10,000 rows x 6 columns | General Purpose domain | Excellent readiness (100/100)
+
+KEY METRICS
+- Primary KPI: age (numeric, normal distribution, range: 18-65, mean: 41.4)
+
+DIMENSIONS
+- Primary dimension: city (8,503 unique cities, geographic)
+
+OPPORTUNITIES
+- 7 analysis types: aggregation, ranking, grouping, comparison, distribution, geographic, kpi_tracking
+
+QUALITY
+- Score: 100/100 - Zero missing values, zero duplicate rows across all 6 columns
+```
+
+---
+
+## 15. Why This Architecture Is Superior
+
+**Information Preservation:** v1.0 silently discards ~70% of DKO intelligence. v2.0 preserves 100% through Module Registry drill-down.
+
+**Output Quality:** When the LLM receives only the 25 most important facts for this specific dataset, it reasons deeply about what matters. When it receives 150 fields indiscriminately, it defaults to surface-level summaries. This is a failure of context curation, not model capability.
+
+**Interactivity:** v1.0 delivers static markdown. v2.0 delivers live components, lazy-loaded explanations, structured data, and drill-down — closer to a professional BI tool than a chatbot.
+
+**Scalability:** v1.0 token costs grow linearly with column count (unbounded for wide datasets). v2.0 maintains constant primary call size regardless of dataset width.
+
+**Correctness:** v1.0 may cause LLM hallucination on raw statistics. v2.0 renders numbers directly from the DKO by the frontend — never narrated by the LLM. The LLM only interprets patterns where natural language adds genuine value.
+
+---
+
+## 16. Scalability Considerations
+
+### 16.1 Module Registry Storage
+
+| Environment | Backend | Notes |
+|------------|---------|-------|
+| Development | In-memory dict | Current; acceptable for single user |
+| Production | Redis + TTL (24h) | Required for concurrent sessions |
+| Enterprise | Persistent store + auth | Full multi-tenant isolation |
+
+### 16.2 Concurrency
+
+The Module Registry is keyed by `session_id`. Multiple users have independent bundles simultaneously. The registry must be thread-safe.
+
+### 16.3 Large Datasets (1M+ rows)
+
+The DIE handles large datasets deterministically. The presentation layer never sees raw data — only DKO summaries. There is no scalability risk from dataset size in this layer. Token count is constant regardless of row count.
+
+---
+
+## 17. Future Extensibility
+
+### 17.1 New Module Addition
+
+Adding a new Knowledge Module requires exactly 4 steps:
+1. Add `_build_newmodule_module(dko)` to `KnowledgeDecomposer`
+2. Define the JSON schema
+3. Register in `MODULE_REGISTRY` with display metadata
+4. Add a frontend card component
+
+No changes to the LLM, ranking system, or any other component.
+
+### 17.2 Module-Level Caching
+
+Module explanations can be cached per `(fingerprint, module_id)`. If a user re-uploads the same dataset, every explanation is served from cache instantly — zero additional LLM calls.
+
+### 17.3 Cross-Dataset Comparisons
+
+A `ComparisonModule` can hold deltas between two DKOs. The architecture handles it without modification.
+
+### 17.4 Agent-Driven Modules
+
+A future version could have an AI agent dynamically generate new module types based on dataset characteristics — e.g., a `FraudPatternModule` triggered when `domain=Finance` and `outlier_rate` is unusually high.
+
+---
+
+## 18. Folder Structure
+
+```
+backend/
++-- presentation/                         # NEW -- replaces dataset_intelligence/context_engine.py
+    +-- __init__.py
+    +-- knowledge_decomposer.py           # DKO -> KnowledgeBundle (12 modules)
+    +-- importance_ranker.py              # Scores all facts, produces ExecutiveFacts
+    +-- module_registry.py               # Session-keyed module storage
+    +-- presentation_engine.py           # Primary LLM call (executive facts only)
+    +-- module_explainer.py              # Per-module on-demand LLM explanation
+    +-- prompts/
+    |   +-- executive_system_prompt.txt
+    |   +-- module_system_prompts/
+    |       +-- quality.txt
+    |       +-- statistics.txt
+    |       +-- columns.txt
+    |       +-- relationships.txt
+    |       +-- patterns.txt
+    |       +-- rare.txt
+    |       +-- distribution.txt
+    |       +-- visualization.txt
+    +-- domain/
+        +-- contracts.py                  # KnowledgeBundle, ExecutiveFact, KnowledgeModule
+        +-- module_ids.py                 # MODULE_IDs enum
+
+frontend/
++-- components/
+    +-- dataset/
+        +-- PresentationView.jsx
+        +-- NarrativePanel.jsx
+        +-- ModuleGrid.jsx
+        +-- cards/
+            +-- ExecutiveSummaryCard.jsx
+            +-- StatisticsTableCard.jsx
+            +-- ColumnIntelligenceCard.jsx
+            +-- DataQualityCard.jsx
+            +-- RelationshipCard.jsx
+            +-- DistributionCard.jsx
+            +-- HiddenPatternsCard.jsx
+            +-- RareObservationsCard.jsx
+            +-- VisualizationSuggestionCard.jsx
+            +-- PredictedQuestionsCard.jsx
+            +-- FullIntelligenceCard.jsx
+```
+
+---
+
+## 19. Example Outputs
+
+### 19.1 v1.0 Output (Rejected for Production)
+
+```
+## Dataset Overview
+
+The dataset contains 10,000 rows and 6 columns. The domain is General Purpose.
+The columns include id, age, name, email, city, and phone.
+The data quality score is 100/100.
+The mean age is 41.4 with a standard deviation of 13.6.
+```
+
+**Problems:** Starts with obvious facts. Narrates numbers that belong in a table. No interactivity. No prioritization. Indistinguishable from a report template.
+
+### 19.2 v2.0 Primary Narrative (Executive Facts Only)
+
+```markdown
+A clean, general-purpose people dataset — and a genuinely interesting one.
+
+**What stood out immediately:** Despite 10,000 records, the data is spotless. Zero missing
+values. Zero duplicate rows. A quality score of 100/100 is rare — it means every analysis
+we run will be grounded in clean ground truth.
+
+The dataset revolves around **age** as its primary measurable dimension. What's interesting
+isn't the center but the **geographic spread**: 8,503 unique cities across 10,000 people
+suggests a highly distributed population with almost no geographic concentration.
+
+**The most interesting question this raises:** Is there a relationship between geography and
+age? Geographic clustering analysis could surface hidden regional age patterns that aggregate
+statistics would completely miss.
+
+Seven analysis types are possible here — and the combination of age + geographic data opens
+some particularly compelling territory.
+```
+
+**What changed:** Interprets rather than reports. Ends with curiosity. Numbers appear in cards, not text.
+
+### 19.3 Module Explanation — Hidden Patterns (On Demand)
+
+*User clicks "Hidden Patterns". LLM receives only PatternsModule (~300 tokens):*
+
+```markdown
+**One pattern worth noting:**
+
+The age distribution is unusually smooth — almost perfectly approximating a uniform
+distribution from 18 to 65. In real-world population datasets, you'd typically expect
+a bimodal pattern (working-age peak + retirement-age cluster) or right-skew.
+
+This near-perfect uniformity suggests either intentional synthesis (stratified sampling
+by age bracket) or a very deliberate sampling methodology. Either way, it means "average
+age" carries less analytical insight than it would in a naturally distributed population.
+```
+
+---
+
+## 20. Architecture Diagrams
+
+### 20.1 System Architecture
+
+```mermaid
+graph TB
+    subgraph DIE["Dataset Intelligence Engine"]
+        S["Stages 1-10 Deterministic Python"]
+        DKO["DatasetKnowledgeObject Immutable"]
+        S --> DKO
+    end
+
+    subgraph PL["Presentation Layer v2.0"]
+        KD["KnowledgeDecomposer\n12 typed modules"]
+        SIR["SemanticImportanceRanker\nScores all facts"]
+        EF["ExecutiveFacts\nTop 25 facts"]
+        MR["ModuleRegistry\nAll 12 modules cached"]
+
+        DKO --> KD
+        KD --> SIR
+        SIR --> EF
+        SIR --> MR
+    end
+
+    subgraph LL["LLM Layer"]
+        PE["PresentationEngine\nPrimary narrative"]
+        ME["ModuleExplainer\nOn-demand"]
+        EF --> PE
+        MR --> ME
+    end
+
+    subgraph FE["Frontend"]
+        NP["NarrativePanel\nStreaming markdown"]
+        MC["ModuleCards\nStructural data"]
+        EX["Card Expansion\nLLM explanation"]
+        PE -->|SSE stream| NP
+        MR -->|JSON| MC
+        ME -->|SSE stream| EX
+    end
+```
+
+### 20.2 Semantic Importance Ranking Flow
+
+```mermaid
+graph LR
+    subgraph Facts["All DKO Facts"]
+        F1["Quality Facts"]
+        F2["Statistical Facts"]
+        F3["Relationship Facts"]
+        F4["Pattern Facts"]
+        F5["Domain Facts"]
+    end
+
+    subgraph Scoring["5-Factor Scoring Engine"]
+        W1["Anomaly x0.30"]
+        W2["Domain Relevance x0.25"]
+        W3["Data Presence x0.20"]
+        W4["Effect Size x0.15"]
+        W5["Novelty x0.10"]
+    end
+
+    subgraph Output["Output"]
+        EF["Executive Facts\nTop 25"]
+        MR["Module Registry\nAll Facts"]
+    end
+
+    F1 & F2 & F3 & F4 & F5 --> W1 & W2 & W3 & W4 & W5
+    W1 & W2 & W3 & W4 & W5 --> EF
+    F1 & F2 & F3 & F4 & F5 --> MR
+```
+
+### 20.3 Upload Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as API
+    participant DIE as Dataset Intelligence Engine
+    participant KD as KnowledgeDecomposer
+    participant SIR as Importance Ranker
+    participant MR as Module Registry
+    participant LLM as LLM Provider
+    participant FE as Frontend
+
+    U->>API: POST /api/upload (file)
+    API->>DIE: analyze(df)
+    DIE-->>API: DKO (10 stages, deterministic)
+    API->>KD: decompose(dko)
+    KD-->>API: KnowledgeBundle (12 modules)
+    API->>SIR: rank(bundle, dko)
+    SIR-->>API: ExecutiveFacts (top 25)
+    API->>MR: store(session_id, bundle)
+    API->>LLM: stream(executive_facts) [700 tokens]
+    LLM-->>FE: SSE chunk stream
+    API-->>FE: SSE done {available_modules}
+    FE->>FE: Render cards from module JSON (no LLM)
+```
+
+---
+
+## 21. API Contracts
+
+### 21.1 Upload SSE Events
+
+```
+event: chunk
+data: {"text": "string"}
+
+event: module_ready
+data: {
+  "module_id": "string",
+  "display_name": "string",
+  "richness_score": 0.0,
+  "preview": "string"
+}
+
+event: done
+data: {
+  "dataset_info": {...},
+  "available_modules": [
+    {
+      "id": "string",
+      "name": "string",
+      "icon": "string",
+      "richness_score": 0.0,
+      "preview": "string"
+    }
+  ]
+}
+
+event: error
+data: {"message": "string"}
+```
+
+### 21.2 Module List
+
+```
+GET /api/datasets/active/modules
+
+Response 200:
+{
+  "modules": [
+    {
+      "id": "quality",
+      "display_name": "Data Quality Report",
+      "icon": "shield-check",
+      "richness_score": 94.5,
+      "is_available": true,
+      "fact_count": 12,
+      "preview": "Quality score 100/100 — zero missing values, zero duplicates"
+    }
+  ]
+}
+```
+
+### 21.3 Module Data
+
+```
+GET /api/datasets/active/modules/{module_id}
+
+Response 200:
+{
+  "module_id": "string",
+  "data": { ... }    // Full module JSON per Section 10 schemas
+}
+
+Response 404:
+{
+  "error": "Module not available for this dataset"
+}
+```
+
+### 21.4 Module Explanation (SSE)
+
+```
+GET /api/datasets/active/modules/{module_id}/explain
+Headers: Accept: text/event-stream
+
+event: chunk
+data: {"text": "string"}
+
+event: done
+data: {}
+```
+
+---
+
+## 22. Implementation Phases
+
+### Phase 1 — Backend Foundation
+
+> [!IMPORTANT]
+> Critical path. Nothing else can proceed without this.
+
+- [ ] Define `KnowledgeBundle`, `KnowledgeModule`, `ExecutiveFact` in `presentation/domain/contracts.py`
+- [ ] Implement `KnowledgeDecomposer` — all 12 module builders
+- [ ] Implement `SemanticImportanceRanker` — 5-factor scoring model
+- [ ] Implement `ModuleRegistry` — thread-safe in-memory store with session management
+- [ ] Redesign `PresentationEngine` — executive-only prompt (~700 tokens max)
+- [ ] Add `module_ready` SSE events to upload endpoint
+- [ ] Add `available_modules` array to SSE `done` event
+
+**Acceptance Criteria:**
+- Primary presentation token count ≤ 900 tokens for any dataset
+- All 12 modules populated from any real DKO
+- ExecutiveFacts array contains 15-25 items
+
+### Phase 2 — Module API
+
+- [ ] Implement `ModuleExplainer` with per-module system prompts
+- [ ] Register module API routes: `GET /modules`, `GET /modules/{id}`, `GET /modules/{id}/explain`
+- [ ] Write module-specific system prompts for all 12 modules
+- [ ] Richness scoring integrated into ranker output
+
+**Acceptance Criteria:**
+- Each endpoint returns typed JSON conforming to Section 10 schemas
+- Module explanation SSE streams within 2s of request
+- Modules with richness < 20 return 404
+
+### Phase 3 — Frontend Components
+
+- [ ] `StatisticsTableCard` — sortable professional table
+- [ ] `DataQualityCard` — progress bars, issue list, composite score
+- [ ] `ColumnIntelligenceCard` — role, semantic type, completeness bar per column
+- [ ] `RelationshipCard` — correlation table with visual strength indicator
+- [ ] `DistributionCard` — distribution label, skewness, quartile display
+- [ ] `HiddenPatternsCard` — pattern list with severity badges
+- [ ] `RareObservationsCard` — unusual values list
+- [ ] `VisualizationSuggestionCard` — chart recommendations with rationale
+- [ ] `PredictedQuestionsCard` — clickable question chips
+- [ ] Card expand/collapse with inline LLM explanation streaming
+- [ ] Local explanation cache (no re-fetch on collapse/expand)
+
+**Acceptance Criteria:**
+- All cards render from module JSON without any LLM call
+- Card expansion triggers `/explain` and streams response inline
+- Cards with richness < 20 are not rendered
+
+### Phase 4 — Polish and Optimization
+
+- [ ] Module explanation caching by `(fingerprint, module_id)`
+- [ ] `FullIntelligenceCard` — raw DKO accordion for power users
+- [ ] Domain-aware boosting in `SemanticImportanceRanker`
+- [ ] Streaming `module_ready` SSE events as modules compute
+- [ ] Performance testing on 100+ column datasets
+- [ ] Remove temporary diagnostic logging from `providers/groq.py`
+
+---
+
+## Appendix A — Design Decision Log
+
+| Decision | Rationale | Rejected Alternative |
+|----------|-----------|---------------------|
+| In-memory Module Registry | Simplicity; Redis upgrade path defined in §16 | Database storage (premature complexity) |
+| Bullet-list Executive Facts | 30% more token-efficient than JSON for LLM | Raw JSON (wastes tokens on syntax characters) |
+| 25 fact ceiling | Empirically sufficient for comprehensive overview; avoids LLM overwhelm | No ceiling (quality regression at scale) |
+| Separate ModuleExplainer from PresentationEngine | SRP — different inputs, different prompts, different call budgets | Single engine (creates god class) |
+| Richness threshold of 20 | Below 20 = insufficient data to produce a useful card | Binary on/off (too coarse, poor UX) |
+| Groq primary, Gemini fallback | Groq speed advantage critical for streaming UX; Gemini ensures reliability | Single provider (no resilience) |
+| ExecutiveFacts as natural-language bullets | LLM comprehension superior to JSON parsing for interpretation tasks | JSON object (more brittle, more tokens) |
+
+---
+
+*This document is the authoritative design specification for Plexis Presentation Architecture v2.0.*  
+*All implementation must conform to the architectural contracts defined herein.*  
+*Deviations require a formal RFC amendment before implementation begins.*

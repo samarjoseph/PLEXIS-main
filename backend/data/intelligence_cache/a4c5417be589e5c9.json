@@ -1,0 +1,1270 @@
+{
+  "fingerprint": "a4c5417be589e5c9",
+  "dataset_name": "mock_sales_data.csv",
+  "analyzed_at": "2026-08-05T02:40:44.134604+00:00",
+  "row_count": 505,
+  "column_count": 11,
+  "memory_usage_bytes": 137368,
+  "versions": {
+    "engine_version": "1.0.0",
+    "dko_schema_version": "2.0.0",
+    "knowledge_graph_version": "1.0.0",
+    "semantic_model_version": "1.0.0",
+    "observation_engine_version": "1.0.0"
+  },
+  "identity": {
+    "probable_purpose": "Retail/Sales",
+    "primary_entities": [],
+    "business_concepts": [],
+    "overall_readiness": "excellent",
+    "kpis": [
+      "Quantity",
+      "Price",
+      "Revenue",
+      "Cost",
+      "Discount"
+    ],
+    "strongest_groupings": [
+      "Region"
+    ]
+  },
+  "observations": [
+    {
+      "observation": "Dataset is exceptionally clean and analysis-ready.",
+      "category": "Quality",
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "Quality score > 90",
+        "lineage": "Quality Engine"
+      }
+    }
+  ],
+  "columns": {
+    "Transaction_ID": {
+      "name": "Transaction_ID",
+      "position": 0,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 500,
+      "unique_pct": 99.01,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 500,
+        "top_values": [
+          [
+            "TXN-0000",
+            2
+          ],
+          [
+            "TXN-0001",
+            2
+          ],
+          [
+            "TXN-0002",
+            2
+          ],
+          [
+            "TXN-0003",
+            2
+          ],
+          [
+            "TXN-0004",
+            2
+          ],
+          [
+            "TXN-0005",
+            1
+          ],
+          [
+            "TXN-0006",
+            1
+          ],
+          [
+            "TXN-0007",
+            1
+          ],
+          [
+            "TXN-0008",
+            1
+          ],
+          [
+            "TXN-0009",
+            1
+          ]
+        ],
+        "rare_values": [
+          "TXN-0000",
+          "TXN-0001",
+          "TXN-0002",
+          "TXN-0003",
+          "TXN-0004",
+          "TXN-0005",
+          "TXN-0006",
+          "TXN-0007",
+          "TXN-0008",
+          "TXN-0009",
+          "TXN-0010",
+          "TXN-0011",
+          "TXN-0012",
+          "TXN-0013",
+          "TXN-0014",
+          "TXN-0015",
+          "TXN-0016",
+          "TXN-0017",
+          "TXN-0018",
+          "TXN-0019"
+        ],
+        "dominant_value": "TXN-0000",
+        "dominant_pct": 0.4,
+        "entropy": 8.9603,
+        "is_high_cardinality": true
+      },
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Customer_Name": {
+      "name": "Customer_Name",
+      "position": 1,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 100,
+      "unique_pct": 19.8,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 100,
+        "top_values": [
+          [
+            "Customer 0",
+            6
+          ],
+          [
+            "Customer 1",
+            6
+          ],
+          [
+            "Customer 2",
+            6
+          ],
+          [
+            "Customer 3",
+            6
+          ],
+          [
+            "Customer 4",
+            6
+          ],
+          [
+            "Customer 5",
+            5
+          ],
+          [
+            "Customer 6",
+            5
+          ],
+          [
+            "Customer 7",
+            5
+          ],
+          [
+            "Customer 8",
+            5
+          ],
+          [
+            "Customer 9",
+            5
+          ]
+        ],
+        "rare_values": [
+          "Customer 5",
+          "Customer 6",
+          "Customer 7",
+          "Customer 8",
+          "Customer 9",
+          "Customer 10",
+          "Customer 11",
+          "Customer 12",
+          "Customer 13",
+          "Customer 14",
+          "Customer 15",
+          "Customer 16",
+          "Customer 17",
+          "Customer 18",
+          "Customer 19",
+          "Customer 20",
+          "Customer 21",
+          "Customer 22",
+          "Customer 23",
+          "Customer 24"
+        ],
+        "dominant_value": "Customer 0",
+        "dominant_pct": 1.19,
+        "entropy": 6.6426,
+        "is_high_cardinality": false
+      },
+      "datetime_stats": null,
+      "characteristics": [],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Region": {
+      "name": "Region",
+      "position": 2,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Geographic",
+      "semantic_type": "unknown",
+      "business_meaning": "region_dimension",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 4,
+      "unique_pct": 0.79,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 4,
+        "top_values": [
+          [
+            "West",
+            149
+          ],
+          [
+            "East",
+            125
+          ],
+          [
+            "North",
+            123
+          ],
+          [
+            "South",
+            108
+          ]
+        ],
+        "rare_values": [],
+        "dominant_value": "West",
+        "dominant_pct": 29.5,
+        "entropy": 1.9904,
+        "is_high_cardinality": false
+      },
+      "datetime_stats": null,
+      "characteristics": [],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Geographic based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Product_Category": {
+      "name": "Product_Category",
+      "position": 3,
+      "dtype_raw": "str",
+      "dtype_category": "unknown",
+      "role": "Attribute",
+      "semantic_type": "unknown",
+      "business_meaning": "category_dimension",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 4,
+      "unique_pct": 0.79,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": null,
+      "categorical_stats": {
+        "cardinality": 4,
+        "top_values": [
+          [
+            "Electronics",
+            138
+          ],
+          [
+            "Sports",
+            133
+          ],
+          [
+            "Clothing",
+            122
+          ],
+          [
+            "Food",
+            112
+          ]
+        ],
+        "rare_values": [],
+        "dominant_value": "Electronics",
+        "dominant_pct": 27.33,
+        "entropy": 1.9954,
+        "is_high_cardinality": false
+      },
+      "datetime_stats": null,
+      "characteristics": [],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as Attribute based on type unknown",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Purchase_Date": {
+      "name": "Purchase_Date",
+      "position": 4,
+      "dtype_raw": "datetime64[us]",
+      "dtype_category": "datetime",
+      "role": "Time",
+      "semantic_type": "date",
+      "business_meaning": "date_time",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 500,
+      "unique_pct": 99.01,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": null,
+      "categorical_stats": null,
+      "datetime_stats": {
+        "min_date": "2022-01-01T00:00:00",
+        "max_date": "2023-05-15T00:00:00",
+        "range_days": 499,
+        "range_years": 1.37,
+        "granularity": "daily",
+        "coverage_pct": 100.0,
+        "year_distribution": {
+          "2022": 370,
+          "2023": 135
+        },
+        "month_distribution": {
+          "1": 67,
+          "2": 56,
+          "3": 62,
+          "4": 60,
+          "5": 46,
+          "6": 30,
+          "7": 31,
+          "8": 31,
+          "9": 30,
+          "10": 31,
+          "11": 30,
+          "12": 31
+        },
+        "has_gaps": false
+      },
+      "characteristics": [
+        "all_unique_values"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.7,
+        "explanation": "Role inferred as Time based on type datetime",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Quantity": {
+      "name": "Quantity",
+      "position": 5,
+      "dtype_raw": "int32",
+      "dtype_category": "integer",
+      "role": "Metric",
+      "semantic_type": "numeric_general",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 49,
+      "unique_pct": 9.7,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 1.0,
+        "max": 49.0,
+        "mean": 24.594059,
+        "median": 25.0,
+        "mode": 26.0,
+        "variance": 206.118615,
+        "std": 14.356832,
+        "q1": 11.0,
+        "q3": 37.0,
+        "iqr": 26.0,
+        "p5": 3.0,
+        "p95": 47.0,
+        "range": 48.0,
+        "skewness": 0.013154,
+        "kurtosis": -1.227438,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 505,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as Metric based on type integer",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Price": {
+      "name": "Price",
+      "position": 6,
+      "dtype_raw": "float64",
+      "dtype_category": "float",
+      "role": "FinancialMetric",
+      "semantic_type": "currency",
+      "business_meaning": "price_metric",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 498,
+      "unique_pct": 98.61,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 13.13,
+        "max": 498.99,
+        "mean": 251.561129,
+        "median": 252.62,
+        "mode": 120.06,
+        "variance": 20980.033493,
+        "std": 144.84486,
+        "q1": 120.06,
+        "q3": 377.48,
+        "iqr": 257.42,
+        "p5": 28.368,
+        "p95": 473.464,
+        "range": 485.86,
+        "skewness": 0.00741,
+        "kurtosis": -1.265885,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 505,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as FinancialMetric based on type float",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Revenue": {
+      "name": "Revenue",
+      "position": 7,
+      "dtype_raw": "float64",
+      "dtype_category": "float",
+      "role": "FinancialMetric",
+      "semantic_type": "currency",
+      "business_meaning": "revenue_metric",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 495,
+      "unique_pct": 98.02,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 0.99,
+        "max": 1488.34,
+        "mean": 201.567228,
+        "median": 141.1,
+        "mode": 2.44,
+        "variance": 43393.980005,
+        "std": 208.312218,
+        "q1": 54.24,
+        "q3": 264.56,
+        "iqr": 210.32,
+        "p5": 11.916,
+        "p95": 639.784,
+        "range": 1487.35,
+        "skewness": 2.120621,
+        "kurtosis": 6.021108,
+        "skewness_label": "strongly right-skewed",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 505,
+        "outlier_count": 32,
+        "outlier_pct": 6.34
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "strongly right-skewed_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as FinancialMetric based on type float",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Cost": {
+      "name": "Cost",
+      "position": 8,
+      "dtype_raw": "float64",
+      "dtype_category": "float",
+      "role": "FinancialMetric",
+      "semantic_type": "currency",
+      "business_meaning": "cost_metric",
+      "null_count": 26,
+      "null_pct": 5.15,
+      "unique_count": 475,
+      "unique_pct": 99.16,
+      "is_nullable": true,
+      "is_constant": false,
+      "is_unique": true,
+      "numeric_stats": {
+        "min": 5.95,
+        "max": 299.51,
+        "mean": 154.662171,
+        "median": 157.59,
+        "mode": 117.22,
+        "variance": 7097.69926,
+        "std": 84.247844,
+        "q1": 81.765,
+        "q3": 227.99,
+        "iqr": 146.225,
+        "p5": 22.226,
+        "p95": 281.87,
+        "range": 293.56,
+        "skewness": -0.070427,
+        "kurtosis": -1.188824,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 479,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "all_unique_values",
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as FinancialMetric based on type float",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Discount": {
+      "name": "Discount",
+      "position": 9,
+      "dtype_raw": "float64",
+      "dtype_category": "float",
+      "role": "FinancialMetric",
+      "semantic_type": "currency",
+      "business_meaning": "discount_metric",
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 476,
+      "unique_pct": 94.26,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": {
+        "min": 0.01,
+        "max": 49.89,
+        "mean": 24.643921,
+        "median": 24.28,
+        "mode": 48.2,
+        "variance": 214.67596,
+        "std": 14.651824,
+        "q1": 12.97,
+        "q3": 37.56,
+        "iqr": 24.59,
+        "p5": 2.014,
+        "p95": 47.898,
+        "range": 49.88,
+        "skewness": 0.009253,
+        "kurtosis": -1.172851,
+        "skewness_label": "approximately normal",
+        "zero_count": 0,
+        "negative_count": 0,
+        "positive_count": 505,
+        "outlier_count": 0,
+        "outlier_pct": 0.0
+      },
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [
+        "approximately normal_distribution"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.8,
+        "explanation": "Role inferred as FinancialMetric based on type float",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    },
+    "Is_Returned": {
+      "name": "Is_Returned",
+      "position": 10,
+      "dtype_raw": "bool",
+      "dtype_category": "boolean",
+      "role": "BooleanFlag",
+      "semantic_type": "boolean_text",
+      "business_meaning": null,
+      "null_count": 0,
+      "null_pct": 0.0,
+      "unique_count": 2,
+      "unique_pct": 0.4,
+      "is_nullable": false,
+      "is_constant": false,
+      "is_unique": false,
+      "numeric_stats": null,
+      "categorical_stats": null,
+      "datetime_stats": null,
+      "characteristics": [],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.5,
+        "explanation": "Role inferred as BooleanFlag based on type boolean",
+        "lineage": "Schema Intelligence -> Statistical Profiler -> Semantic Engine"
+      }
+    }
+  },
+  "analytical_groups": [
+    {
+      "name": "Financial Metrics",
+      "group_type": "Financial",
+      "columns": [
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": ""
+      }
+    },
+    {
+      "name": "Time Dimensions",
+      "group_type": "Time",
+      "columns": [
+        "Purchase_Date"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": ""
+      }
+    }
+  ],
+  "knowledge_graph": {
+    "hierarchies": [],
+    "dependencies": [],
+    "groupings": [
+      {
+        "dimension": "Purchase_Date",
+        "metrics": [
+          "Quantity",
+          "Price",
+          "Revenue",
+          "Cost",
+          "Discount"
+        ],
+        "metadata": {
+          "confidence": 1.0,
+          "importance": 0.0,
+          "explanation": "Time column controls metrics",
+          "lineage": "Relationship Engine"
+        }
+      }
+    ],
+    "correlations": []
+  },
+  "opportunities": [
+    {
+      "name": "aggregation",
+      "description": "Supports aggregation analysis.",
+      "required_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "ranking",
+      "description": "Supports ranking analysis.",
+      "required_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "grouping",
+      "description": "Supports grouping analysis.",
+      "required_columns": [
+        "Region",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "comparison",
+      "description": "Supports comparison analysis.",
+      "required_columns": [
+        "Region",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "time_series",
+      "description": "Supports time_series analysis.",
+      "required_columns": [
+        "Purchase_Date",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "trend",
+      "description": "Supports trend analysis.",
+      "required_columns": [
+        "Purchase_Date",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "forecasting",
+      "description": "Supports forecasting analysis.",
+      "required_columns": [
+        "Purchase_Date",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "distribution",
+      "description": "Supports distribution analysis.",
+      "required_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "correlation",
+      "description": "Supports correlation analysis.",
+      "required_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "geographic",
+      "description": "Supports geographic analysis.",
+      "required_columns": [
+        "Region",
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "cohort",
+      "description": "Supports cohort analysis.",
+      "required_columns": [
+        "Purchase_Date",
+        "Region"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    },
+    {
+      "name": "kpi_tracking",
+      "description": "Supports kpi_tracking analysis.",
+      "required_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount"
+      ],
+      "metadata": {
+        "confidence": 1.0,
+        "importance": 0.0,
+        "explanation": "",
+        "lineage": "Capability Detector"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "title": "Dataset has 5 metric(s), 1 dimension(s)",
+      "description": "Found 5 quantitative metric column(s) (Quantity, Price, Revenue...) and 1 categorical dimension(s) (Region).",
+      "severity": "positive",
+      "category": "schema",
+      "affected_columns": [
+        "Quantity",
+        "Price",
+        "Revenue",
+        "Cost",
+        "Discount",
+        "Region"
+      ],
+      "evidence": {
+        "metric_count": 5,
+        "dimension_count": 1
+      },
+      "recommendation": null,
+      "importance_score": 7.0
+    },
+    {
+      "title": "Time dimension available for trend analysis",
+      "description": "Column 'Purchase_Date' enables time-series analysis, trend tracking, and period-over-period comparisons.",
+      "severity": "positive",
+      "category": "schema",
+      "affected_columns": [
+        "Purchase_Date"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.5
+    },
+    {
+      "title": "Excellent data quality (score: 98/100)",
+      "description": "The dataset is clean, complete, and ready for analysis with minimal preparation needed.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.0
+    },
+    {
+      "title": "High analytical potential: 12 analysis types available",
+      "description": "The dataset supports 12 different analysis types including: aggregation, ranking, grouping, comparison, time_series.",
+      "severity": "positive",
+      "category": "capability",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 6.0
+    },
+    {
+      "title": "Time-series analysis available: 'Purchase_Date' \u00d7 5 metric(s)",
+      "description": "'Purchase_Date' can be used to track trends in Quantity, Price, Revenue... over time.",
+      "severity": "positive",
+      "category": "relationship",
+      "affected_columns": [
+        "Purchase_Date",
+        "Quantity",
+        "Price",
+        "Revenue"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 5.5
+    },
+    {
+      "title": "'Revenue' is strongly right-skewed",
+      "description": "'Revenue' has a skewness of 2.12, indicating a right-skewed distribution. The mean (201.57) may not accurately represent the typical value. The median (141.10) is more representative.",
+      "severity": "medium",
+      "category": "statistical",
+      "affected_columns": [
+        "Revenue"
+      ],
+      "evidence": {
+        "skewness": 2.120621,
+        "mean": 201.567228,
+        "median": 141.1
+      },
+      "recommendation": "Consider using median instead of mean when summarizing 'Revenue'.",
+      "importance_score": 4.0
+    },
+    {
+      "title": "5 duplicate rows detected (1.0%)",
+      "description": "The dataset contains 5 fully duplicate rows which could inflate aggregate results.",
+      "severity": "medium",
+      "category": "quality",
+      "affected_columns": [],
+      "evidence": {},
+      "recommendation": "Remove duplicates with df.drop_duplicates() before analysis.",
+      "importance_score": 3.0
+    },
+    {
+      "title": "'Revenue' spans a very wide value range",
+      "description": "'Revenue' ranges from 0.99 to 1,488.34 (ratio: 1,503x). Log scaling may improve readability in visualizations.",
+      "severity": "low",
+      "category": "statistical",
+      "affected_columns": [
+        "Revenue"
+      ],
+      "evidence": {
+        "min": 0.99,
+        "max": 1488.34,
+        "ratio": 1503.3737373737374
+      },
+      "recommendation": "Consider log scale for charts involving this column.",
+      "importance_score": 2.0
+    },
+    {
+      "title": "'Discount' spans a very wide value range",
+      "description": "'Discount' ranges from 0.01 to 49.89 (ratio: 4,989x). Log scaling may improve readability in visualizations.",
+      "severity": "low",
+      "category": "statistical",
+      "affected_columns": [
+        "Discount"
+      ],
+      "evidence": {
+        "min": 0.01,
+        "max": 49.89,
+        "ratio": 4989.0
+      },
+      "recommendation": "Consider log scale for charts involving this column.",
+      "importance_score": 2.0
+    },
+    {
+      "title": "'Transaction_ID' has no missing values",
+      "description": "'Transaction_ID' is 100% complete across all 505 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "Transaction_ID"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    },
+    {
+      "title": "'Customer_Name' has no missing values",
+      "description": "'Customer_Name' is 100% complete across all 505 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "Customer_Name"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    },
+    {
+      "title": "'Region' has no missing values",
+      "description": "'Region' is 100% complete across all 505 rows.",
+      "severity": "positive",
+      "category": "quality",
+      "affected_columns": [
+        "Region"
+      ],
+      "evidence": {},
+      "recommendation": null,
+      "importance_score": 1.5
+    }
+  ],
+  "predicted_questions": [
+    {
+      "question": "What are the top 10 records by Revenue?",
+      "category": "ranking",
+      "confidence": 0.95,
+      "relevant_columns": [
+        "Revenue"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "Show Revenue over time",
+      "category": "trend",
+      "confidence": 0.92,
+      "relevant_columns": [
+        "Revenue",
+        "Purchase_Date"
+      ],
+      "suggested_chart": "line"
+    },
+    {
+      "question": "What is the total Revenue?",
+      "category": "aggregation",
+      "confidence": 0.9,
+      "relevant_columns": [
+        "Revenue"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "Compare Revenue by Region",
+      "category": "comparison",
+      "confidence": 0.9,
+      "relevant_columns": [
+        "Revenue",
+        "Region"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the average Revenue?",
+      "category": "aggregation",
+      "confidence": 0.85,
+      "relevant_columns": [
+        "Revenue"
+      ],
+      "suggested_chart": null
+    },
+    {
+      "question": "Which product category generates the most revenue?",
+      "category": "comparison",
+      "confidence": 0.85,
+      "relevant_columns": [
+        "Quantity",
+        "Region"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the monthly trend of Revenue?",
+      "category": "trend",
+      "confidence": 0.82,
+      "relevant_columns": [
+        "Revenue",
+        "Purchase_Date"
+      ],
+      "suggested_chart": "line"
+    },
+    {
+      "question": "What is the lowest Revenue in the dataset?",
+      "category": "ranking",
+      "confidence": 0.8,
+      "relevant_columns": [
+        "Revenue"
+      ],
+      "suggested_chart": "bar"
+    },
+    {
+      "question": "What is the sales growth rate year over year?",
+      "category": "trend",
+      "confidence": 0.8,
+      "relevant_columns": [
+        "Quantity",
+        "Purchase_Date"
+      ],
+      "suggested_chart": "line"
+    },
+    {
+      "question": "What is the distribution of Revenue?",
+      "category": "distribution",
+      "confidence": 0.75,
+      "relevant_columns": [
+        "Revenue"
+      ],
+      "suggested_chart": "histogram"
+    }
+  ],
+  "quality_report": {
+    "overall_score": 98.0,
+    "completeness_score": 99.1,
+    "consistency_score": 100.0,
+    "uniqueness_score": 95.0,
+    "issues": [
+      {
+        "issue_type": "duplicate_rows",
+        "severity": "medium",
+        "affected_columns": [],
+        "description": "Dataset contains 5 duplicate rows (1.0%).",
+        "recommendation": "Remove or investigate duplicate rows before running aggregations.",
+        "impact_score": 3.0
+      },
+      {
+        "issue_type": "extreme_outliers",
+        "severity": "medium",
+        "affected_columns": [
+          "Revenue"
+        ],
+        "description": "'Revenue' has 32 outliers (6.3%) \u2014 they may distort mean calculations.",
+        "recommendation": "Review outliers in 'Revenue'. Consider using median instead of mean.",
+        "impact_score": 3.0
+      },
+      {
+        "issue_type": "missing_values",
+        "severity": "medium",
+        "affected_columns": [
+          "Cost"
+        ],
+        "description": "'Cost' has 5.2% missing values.",
+        "recommendation": "Missing values in 'Cost' may affect some analyses.",
+        "impact_score": 2.0
+      },
+      {
+        "issue_type": "high_cardinality",
+        "severity": "low",
+        "affected_columns": [
+          "Transaction_ID"
+        ],
+        "description": "'Transaction_ID' has very high cardinality (500 unique values) \u2014 may not be suitable as a grouping dimension.",
+        "recommendation": "Consider bucketing 'Transaction_ID' into fewer categories for aggregation.",
+        "impact_score": 1.5
+      }
+    ],
+    "duplicate_row_count": 5,
+    "duplicate_row_pct": 0.99,
+    "total_missing_cells": 26,
+    "total_missing_pct": 0.47,
+    "columns_with_issues": [
+      "Cost",
+      "Revenue",
+      "Transaction_ID"
+    ],
+    "analysis_readiness": "excellent"
+  },
+  "domain": {
+    "domain": "Retail/Sales",
+    "confidence": 1.0,
+    "evidence": [
+      "Column 'Product_Category' maps to concept 'category_dimension'",
+      "Column 'Price' maps to concept 'price_metric'",
+      "Column 'Revenue' maps to concept 'revenue_metric'",
+      "Column 'Discount' maps to concept 'discount_metric'",
+      "Column 'Transaction_ID' suggests retail/sales data"
+    ],
+    "secondary_domain": null
+  },
+  "presentation": {
+    "presentation": "This looks like a **Retail/Sales** dataset. Here's my first impression:\n\nData quality is **98/100** (excellent) \u2014 this dataset is well-prepared for analysis.\nI can see **4 measurable column(s)**: `Quantity`, `Price`, `Revenue`, `Cost`.\nThe dataset can be broken down by **1 dimension(s)**: `Region`.\n\nPlexis can perform **12** types of analysis on this dataset, including aggregation, ranking, grouping, comparison, time_series.",
+    "version": "2.0",
+    "model_used": "gemini-3.5-flash",
+    "generated_at": "2026-08-05T02:40:48.098485+00:00",
+    "generated_by": "llm"
+  }
+}

@@ -1,0 +1,777 @@
+/* ============================================================================
+   workspace.css — DatasetWorkspace component styles
+   
+   Design language: compact, data-dense, premium dark glass panel.
+   Matches the Plexis dark theme from index.css.
+   
+   Color tokens:
+     --ws-bg           workspace panel background
+     --ws-border       subtle border color
+     --ws-text         default text
+     --ws-text-dim     secondary text (column names, counts)
+     --ws-header-bg    header bar background
+     --ws-row-bg       table row background
+     --ws-row-alt      alternating row
+     --ws-row-hover    row hover state
+     --ws-row-selected row selected state
+     
+   Evidence highlight tokens (per-row CSS custom properties):
+     --ev-amber  --ev-red  --ev-blue  --ev-green  --ev-purple  --ev-cyan
+============================================================================ */
+
+/* ── Panel ──────────────────────────────────────────────────────────────── */
+
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--ws-bg, #0d0d0f);
+  border-left: 1px solid var(--ws-border, rgba(255,255,255,0.07));
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ws-text, #e2e8f0);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.ws-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ws-border, rgba(255,255,255,0.06));
+  background: var(--ws-header-bg, #111113);
+  flex-shrink: 0;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.ws-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ws-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ws-header-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-text, #e2e8f0);
+  letter-spacing: 0.01em;
+}
+
+.ws-header-rowcount {
+  font-size: 11px;
+  color: var(--ws-text-dim, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-header-loaded {
+  color: rgba(99, 102, 241, 0.6);
+  font-size: 10.5px;
+}
+
+/* Active evidence chip */
+.ws-header-evidence-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 20px;
+  padding: 2px 8px 2px 6px;
+  font-size: 11px;
+  color: #f59e0b;
+  max-width: 280px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-evidence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+  animation: ws-pulse 2s ease-in-out infinite;
+}
+
+.ws-evidence-clear-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.ws-evidence-clear-btn:hover { opacity: 1; }
+
+/* ── Search ──────────────────────────────────────────────────────────────── */
+
+.ws-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ws-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--ws-text-dim, #64748b);
+  pointer-events: none;
+}
+
+.ws-search-input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 4px 8px 4px 26px;
+  font-size: 11px;
+  color: var(--ws-text, #e2e8f0);
+  width: 160px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+.ws-search-input:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.05);
+}
+.ws-search-input::placeholder { color: var(--ws-text-dim, #475569); }
+
+/* ── Loading ──────────────────────────────────────────────────────────────── */
+
+.ws-loading-spinner {
+  color: var(--ws-text-dim, #64748b);
+}
+
+.ws-loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 200px;
+  color: var(--ws-text-dim, #64748b);
+}
+
+/* ── Close button ───────────────────────────────────────────────────────── */
+
+.ws-close-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--ws-text-dim, #64748b);
+  transition: color 0.15s, background 0.15s;
+}
+.ws-close-btn:hover {
+  color: var(--ws-text, #e2e8f0);
+  background: rgba(255,255,255,0.07);
+}
+
+/* ── Table container ────────────────────────────────────────────────────── */
+
+.ws-table-container {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.12) transparent;
+  outline: none; /* keyboard focus managed via cell highlight, not container ring */
+}
+.ws-table-container::-webkit-scrollbar { width: 5px; height: 5px; }
+.ws-table-container::-webkit-scrollbar-track { background: transparent; }
+.ws-table-container::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+
+.ws-table {
+  border-collapse: collapse;
+  /* min-width: 100% so narrow datasets fill the panel;
+     width: max-content lets wide datasets expand beyond the container
+     so all columns are reachable via horizontal scroll.
+     NEVER use table-layout:fixed here — it collapses columns to viewport width. */
+  min-width: 100%;
+  width: max-content;
+  table-layout: auto;
+}
+
+/* Header row */
+.ws-thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ws-header-bg, #111113);
+}
+
+.ws-th {
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ws-text-dim, #64748b);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  white-space: nowrap;
+  /* overflow + text-overflow handled by inner .ws-th-content span */
+  user-select: none;
+  transition: color 0.15s, background 0.15s;
+  /* min-width keeps columns readable; NO max-width — all columns must be reachable */
+  min-width: 80px;
+  width: 140px;  /* default column width; overridden per-column by JS resizing later */
+}
+.ws-th:hover {
+  color: var(--ws-text, #e2e8f0);
+  background: rgba(255,255,255,0.03);
+}
+.ws-th--sorted {
+  color: #6366f1;
+}
+.ws-th--rownum.ws-th--gutter {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  cursor: default;
+  color: rgba(255,255,255,0.2);
+  font-size: 10px;
+}
+
+/* Column selected (Shift+click header) */
+.ws-th--col-selected {
+  background: rgba(99, 102, 241, 0.08);
+  color: #818cf8;
+  border-bottom-color: rgba(99, 102, 241, 0.4);
+}
+.ws-th-content {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+/* Column label truncates; sort icon stays visible */
+.ws-th-content > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+
+.ws-sort-icon {
+  flex-shrink: 0;
+  color: #6366f1;
+}
+
+/* Body rows */
+.ws-tbody {}
+
+.ws-row {
+  height: 36px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  /* cursor is on individual cells now, not the row */
+  cursor: default;
+  transition: background 0.1s;
+  position: relative;
+}
+.ws-row:hover:not(.ws-row--selected):not(.ws-row--highlight) {
+  background: rgba(255,255,255,0.025);
+}
+
+/* Row states */
+.ws-row--selected {
+  background: rgba(99, 102, 241, 0.1) !important;
+  outline: 1px solid rgba(99, 102, 241, 0.3);
+  outline-offset: -1px;
+}
+
+.ws-row--faded {
+  opacity: 0.2;
+}
+
+/* ── Evidence highlights ────────────────────────────────────────────────── */
+
+.ws-row--highlight-amber { background: rgba(245, 158, 11, 0.12) !important; }
+.ws-row--highlight-red   { background: rgba(239, 68, 68, 0.12) !important; }
+.ws-row--highlight-blue  { background: rgba(59, 130, 246, 0.12) !important; }
+.ws-row--highlight-green { background: rgba(16, 185, 129, 0.12) !important; }
+.ws-row--highlight-purple{ background: rgba(139, 92, 246, 0.12) !important; }
+.ws-row--highlight-cyan  { background: rgba(6, 182, 212, 0.12) !important; }
+.ws-row--highlight-orange{ background: rgba(249, 115, 22, 0.12) !important; }
+
+/* Left-border accent for highlighted rows */
+.ws-row--highlight::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--row-highlight-color, #f59e0b);
+}
+
+/* Pulse animation on first render */
+@keyframes ws-row-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.ws-row--pulse {
+  animation: ws-row-pulse 1.2s ease-in-out 3;
+}
+
+/* Evidence pulse dot */
+@keyframes ws-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+/* Cells */
+.ws-td {
+  padding: 0 10px;
+  height: 36px;
+  vertical-align: middle;
+  /* NO max-width — all columns must be reachable via horizontal scroll.
+     Truncation handled by inner .ws-cell-value span. */
+  min-width: 80px;
+  width: 140px;
+  overflow: hidden;
+  cursor: cell;
+  position: relative; /* needed for active cell ring */
+  user-select: none;  /* selection managed by JS */
+}
+
+/* Row-number gutter td */
+.ws-td--rownum.ws-td--gutter {
+  font-size: 10px;
+  color: rgba(255,255,255,0.2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding-right: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.1s, background 0.1s;
+}
+.ws-td--rownum.ws-td--gutter:hover {
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.5);
+}
+
+/* Cell in selection range */
+.ws-td--cell-selected {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+/* Active / focused cell — the one with keyboard focus */
+.ws-td--active {
+  background: rgba(99, 102, 241, 0.18) !important;
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  outline-offset: -1px;
+  z-index: 1;
+}
+
+/* Column selected */
+.ws-td--col-selected {
+  background: rgba(99, 102, 241, 0.07);
+}
+.ws-td--highlighted {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.ws-cell-value {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ws-text, #e2e8f0);
+}
+
+.ws-null {
+  color: rgba(255,255,255,0.18);
+  font-style: italic;
+}
+
+/* ── Context menu ───────────────────────────────────────────────────────── */
+
+.ws-context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.ws-context-menu {
+  position: fixed;
+  z-index: 200;
+  background: #1a1a1f;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 180px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  backdrop-filter: blur(12px);
+}
+
+.ws-context-item {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 0.1s;
+}
+.ws-context-item:hover {
+  background: rgba(99, 102, 241, 0.15);
+}
+.ws-context-item--label {
+  font-weight: 600;
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  cursor: default;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 4px;
+}
+.ws-context-item--label:hover { background: none; }
+
+.ws-context-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 4px 0;
+}
+
+/* ── WorkspaceToggleButton ─────────────────────────────────────────────── */
+
+.ws-toggle-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: rgba(255,255,255,0.45);
+  position: relative;
+  transition: color 0.2s, background 0.2s;
+}
+.ws-toggle-btn:hover {
+  color: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.07);
+}
+.ws-toggle-btn--active {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.12);
+}
+.ws-toggle-btn--active:hover {
+  color: #818cf8;
+}
+
+.ws-toggle-btn__indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+}
+
+/* ── EvidenceCard ───────────────────────────────────────────────────────── */
+
+.ev-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.ev-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--ev-color, #6366f1);
+}
+
+.ev-card--collection {
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.ev-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.ev-card-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ev-card-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.ev-card-count {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.ev-card-unstable {
+  font-size: 10px;
+  color: #f97316;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.7;
+}
+
+.ev-card-expand-btn {
+  all: unset;
+  cursor: pointer;
+  color: rgba(255,255,255,0.35);
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+  transition: color 0.15s;
+}
+.ev-card-expand-btn:hover { color: rgba(255,255,255,0.7); }
+
+.ev-card-desc {
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ev-card-preview {
+  overflow: hidden;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ev-card-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.ev-card-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 60px;
+}
+
+.ev-card-cell-key {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ev-card-cell-val {
+  font-size: 12px;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.ev-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ev-card-action {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.ev-card-action--primary {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+.ev-card-action--primary:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.ev-card-action--secondary {
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.5);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.ev-card-action--secondary:hover {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.8);
+}
+
+/* Evidence legend (collection) */
+.ev-card-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ev-card-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.6);
+}
+
+.ev-card-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ev-card-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   STAGE 2 — Spreadsheet interaction additions
+   ============================================================================ */
+
+/* Column headers need relative positioning for the resize handle */
+.ws-th {
+  position: relative;
+}
+
+/* ── Column resize handle ──────────────────────────────────────────────── */
+
+.ws-col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 1;
+  /* Invisible by default; becomes visible on th:hover */
+  background: transparent;
+  transition: background 0.15s;
+}
+.ws-th:hover .ws-col-resize-handle {
+  background: rgba(99, 102, 241, 0.4);
+}
+.ws-col-resize-handle:hover,
+.ws-col-resize-handle:active {
+  background: rgba(99, 102, 241, 0.8) !important;
+}
+
+/* ── Copy-selection button in header ──────────────────────────────────── */
+
+.ws-copy-sel-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: rgba(255,255,255,0.4);
+  transition: color 0.15s, background 0.15s;
+}
+.ws-copy-sel-btn:hover {
+  color: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.07);
+}
+
+@keyframes ws-copy-flash {
+  0%   { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+  100% { background: transparent; color: rgba(255,255,255,0.4); }
+}
+.ws-copy-sel-btn--flash {
+  animation: ws-copy-flash 1.5s ease forwards;
+}
+
+/* ── Show-hidden-columns button ────────────────────────────────────────── */
+
+.ws-show-cols-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  color: rgba(255, 193, 7, 0.7);
+  background: rgba(255, 193, 7, 0.06);
+  border: 1px solid rgba(255, 193, 7, 0.15);
+  transition: background 0.15s, color 0.15s;
+}
+.ws-show-cols-btn:hover {
+  background: rgba(255, 193, 7, 0.12);
+  color: #ffc107;
+}

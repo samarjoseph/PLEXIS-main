@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Modern Dark Theme - Deep Space / AI Inspired */
+  --bg: #030409;
+  --surface: #0a0c14;
+  --surface-hover: #121521;
+  --surface-glass: rgba(10, 12, 20, 0.7);
+  
+  --border: rgba(255, 255, 255, 0.08);
+  
+  /* Default Accent (Indigo) */
+  --accent: #6366f1; 
+  --accent-hover: #4f46e5;
+  --border-focus: rgba(99, 102, 241, 0.4);
+  --accent-2: #a855f7; 
+  --accent-3: #ec4899; 
+  
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --dim: #475569;
+  
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-accent="purple"] {
+  --accent: #a855f7;
+  --accent-hover: #9333ea;
+  --border-focus: rgba(168, 85, 247, 0.4);
+  --accent-2: #ec4899;
+}
+
+:root[data-accent="blue"] {
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --border-focus: rgba(59, 130, 246, 0.4);
+  --accent-2: #6366f1;
+}
+
+:root[data-accent="cyan"] {
+  --accent: #06b6d4;
+  --accent-hover: #0891b2;
+  --border-focus: rgba(6, 182, 212, 0.4);
+  --accent-2: #3b82f6;
+}
+
+:root[data-accent="teal"] {
+  --accent: #14b8a6;
+  --accent-hover: #0d9488;
+  --border-focus: rgba(20, 184, 166, 0.4);
+  --accent-2: #06b6d4;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%; height: 100%;
+  background: var(--bg); color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+::selection { background: rgba(99, 102, 241, 0.3); color: var(--text); }
+
+.glass-panel {
+  background: var(--surface-glass);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+/* Auth Loading Screen */
+.auth-loading-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; background: var(--bg); color: var(--muted); gap: 16px;
+}
+.auth-loading-spinner {
+  width: 32px; height: 32px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Dashboard V2 styles are in src/styles/dashboard.css */

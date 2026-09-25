@@ -1,0 +1,229 @@
+.ea-admin-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #030409);
+  color: white;
+  font-family: var(--font, system-ui, sans-serif);
+}
+
+.ea-admin-login-card {
+  background: var(--surface, #0a0c14);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 3rem;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.ea-admin-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: white;
+  font-family: inherit;
+  margin-top: 1rem;
+}
+
+.ea-admin-page {
+  min-height: 100vh;
+  background: var(--bg, #030409);
+  color: white;
+  font-family: var(--font, system-ui, sans-serif);
+}
+
+.ea-admin-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: var(--surface, #0a0c14);
+}
+
+.ea-admin-main {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.ea-admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.ea-stat-card {
+  background: var(--surface, #0a0c14);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 1.5rem;
+  border-radius: 12px;
+}
+
+.ea-stat-card h4 {
+  color: var(--muted, #94a3b8);
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.ea-stat-card h2 {
+  font-size: 2rem;
+  margin: 0;
+  color: var(--accent, #6366f1);
+}
+
+.ea-admin-controls {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.ea-admin-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  flex: 1;
+  max-width: 400px;
+}
+
+.ea-admin-search input {
+  background: transparent;
+  border: none;
+  color: white;
+  outline: none;
+  width: 100%;
+}
+
+.ea-admin-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+}
+
+.ea-admin-filter select {
+  background: transparent;
+  border: none;
+  color: white;
+  outline: none;
+}
+
+.ea-admin-filter select option {
+  background: var(--surface, #0a0c14);
+}
+
+.ea-admin-table-container {
+  background: var(--surface, #0a0c14);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.ea-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.ea-admin-table th, .ea-admin-table td {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.ea-admin-table th {
+  color: var(--muted, #94a3b8);
+  font-weight: 500;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.ea-admin-empty {
+  text-align: center;
+  padding: 3rem !important;
+  color: var(--muted, #94a3b8);
+}
+
+.ea-td-date {
+  color: var(--muted, #94a3b8);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.ea-user-email {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.ea-user-role {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+
+.ea-feature-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.ea-feature-tag {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border-radius: 4px;
+}
+
+.ea-idea-text {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: #cbd5e1;
+  max-width: 400px;
+}
+
+.ea-status-select {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: rgba(255,255,255,0.05);
+  color: white;
+  outline: none;
+}
+
+.ea-status-select.status-new {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.ea-status-select.status-reviewed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.ea-status-select.status-contacted {
+  background: rgba(139, 92, 246, 0.1);
+  color: #a78bfa;
+  border-color: rgba(139, 92, 246, 0.2);
+}

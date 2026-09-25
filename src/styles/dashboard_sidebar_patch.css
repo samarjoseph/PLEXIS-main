@@ -1,0 +1,318 @@
+/* ═══════════════════════════════════════════════════════════════════
+   SIDEBAR LOGO BEHAVIOR — PATCH
+   Add these rules to your dashboard.css (or import this file).
+   They handle:
+     1. Floating logo when sidebar is collapsed (desktop)
+     2. Static logo inside sidebar on mobile
+     3. Mobile hamburger button in chat header
+     4. Logo toggle button states
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Floating logo (desktop, collapsed state) ───────────────── */
+
+/*
+  This element is rendered by SidebarV2 outside the sidebar panel.
+  It sits fixed at top-left, z-indexed above everything, and is
+  the ONLY thing visible when the sidebar is collapsed on desktop.
+*/
+.v2-sidebar-floating-logo {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: auto;               /* auto width to respect content */
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 14px;        /* match sidebar header padding */
+  z-index: 120;              /* above sidebar, below modals */
+  pointer-events: auto;
+}
+
+/* ── 2. Logo toggle button (shared desktop styles) ─────────────── */
+
+.v2-logo-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.v2-logo-toggle:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.07));
+  color: var(--accent, #6366f1);
+}
+
+.v2-logo-toggle:focus-visible {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 2px;
+}
+
+/* Static variant — mobile logo (no hover, no click) */
+.v2-logo-toggle--static {
+  cursor: default;
+  pointer-events: none;
+}
+
+.v2-logo-toggle--static:hover {
+  background: transparent;
+  color: var(--text);
+}
+
+/* Icon layers inside the toggle */
+.v2-logo-icon,
+.v2-logo-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* ── 3. Sidebar header layout ──────────────────────────────────── */
+
+.v2-sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  height: 56px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.v2-sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.v2-sidebar-logo-text {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ── 4. Sidebar panel itself ───────────────────────────────────── */
+
+.v2-sidebar {
+  position: relative;
+  height: 100%;
+  background: var(--surface, #0d0e17);
+  border-right: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  /* width animated by framer-motion on desktop */
+}
+
+/* Collapsed: no border (width is 0, nothing visible) */
+.v2-sidebar--collapsed {
+  border-right-color: transparent;
+}
+
+/* ── 5. Mobile sidebar (overlay pattern) ───────────────────────── */
+
+/*
+  On mobile (< 1024px) the sidebar uses position:fixed + translateX
+  instead of width animation, exactly like ChatGPT / Claude mobile.
+*/
+@media (max-width: 1023px) {
+  .v2-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px !important;      /* override framer width on mobile */
+    transform: translateX(-100%);
+    transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 110;
+    border-right: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  }
+
+  .v2-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Floating logo never appears on mobile */
+  .v2-sidebar-floating-logo {
+    display: none !important;
+  }
+}
+
+/* ── 6. Sidebar overlay (mobile backdrop) ──────────────────────── */
+
+.v2-sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+@media (max-width: 1023px) {
+  .v2-sidebar-overlay {
+    display: block;
+  }
+
+  .v2-sidebar-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── 7. Chat header — mobile hamburger ─────────────────────────── */
+
+.v2-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  height: 56px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+  background: var(--bg, #030409);
+}
+
+/*
+  Mobile menu button — only rendered in JSX when !isDesktop.
+  Styles ensure it looks correct when present.
+*/
+.v2-mobile-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.v2-mobile-menu-btn:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.07));
+}
+
+.v2-mobile-menu-btn:focus-visible {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 2px;
+}
+
+.v2-chat-header-brand {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  transform: translateY(-2px); /* perfectly align with Sparkles logo */
+}
+
+/* On mobile the brand name is centered since hamburger takes left slot */
+.v2-chat-header-brand--mobile {
+  flex: 1;
+  text-align: center;
+  /* Account for the hamburger width so text is truly centered */
+  margin-right: 36px;
+}
+
+/* ── 8. Tooltip (shared) ───────────────────────────────────────── */
+
+.v2-tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.v2-tooltip {
+  position: absolute;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(15, 15, 20, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.v2-tooltip-label {
+  font-size: 0.78rem;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.v2-tooltip-shortcut {
+  font-size: 0.72rem;
+  color: var(--dim, rgba(255, 255, 255, 0.35));
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ── 9. Dashboard layout — ensure chat area fills remaining space ─ */
+
+.v2-dashboard {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg, #030409);
+  position: relative;
+}
+
+/*
+  On desktop when collapsed, sidebar width is 0 and the floating logo
+  sits at fixed position. The chat area naturally fills full width.
+  Add left padding so content doesn't hide under the floating logo.
+*/
+.v2-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* When sidebar is collapsed on desktop, nudge chat content right
+   so the floating logo sits perfectly next to the header text */
+.v2-dashboard:has(.v2-sidebar--collapsed) .v2-chat-header {
+  padding-left: 58px;   /* 14px (padding) + 34px (logo) + 10px (gap) = 58px */
+  transition: padding-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* When sidebar is open, normal padding */
+.v2-dashboard:not(:has(.v2-sidebar--collapsed)) .v2-chat-header {
+  padding-left: 16px;
+  transition: padding-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── 10. Remove the old floating reopen button if it existed ───── */
+
+/* Safety: hide any legacy .v2-sidebar-reopen element */
+.v2-sidebar-reopen {
+  display: none !important;
+}
