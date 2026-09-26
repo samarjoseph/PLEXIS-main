@@ -445,105 +445,6 @@ export default function EarlyAccessPage() {
           </div>
 
           <div className="ea-onboarding-card">
-            <div className="ea-onboarding-step">
-              <div className="ea-step-header">
-                <h2>What would make Plexis indispensable to you?</h2>
-                <AnimatePresence>
-                  {feedbackOptions.length > 0 && (
-                    <motion.span 
-                      className="ea-counter-badge"
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.8 }}
-                    >
-                      {feedbackOptions.length} selected
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </div>
-              <div className="ea-options">
-                {featureOptions.map((opt) => (
-                  <motion.button
-                    key={opt}
-                    className={`ea-option ${feedbackOptions.includes(opt) ? 'selected' : ''}`}
-                    onClick={() => toggleOption(opt)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    {opt}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-
-            <AnimatePresence>
-              {feedbackOptions.length > 0 && (
-                <motion.div 
-                  className="ea-onboarding-step"
-                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginTop: '2rem' }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  transition={{ duration: 0.4 }}
-                >
-                  <div className="ea-step-header">
-                    <h2>Tell us what you're trying to solve.</h2>
-                  </div>
-                  <div className="ea-textarea-container">
-                    <textarea
-                      className="ea-textarea"
-                      placeholder="What do you wish you could do with your data in a few clicks?"
-                      value={feedbackText}
-                      maxLength={1000}
-                      onChange={(e) => setFeedbackText(e.target.value)}
-                    />
-                    <div className="ea-char-counter">
-                      {feedbackText.length}/1000
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-              {(feedbackOptions.length > 0 && feedbackText.length > 0) && (
-                <motion.div 
-                  className="ea-onboarding-step"
-                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginTop: '2rem' }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  transition={{ duration: 0.4 }}
-                >
-                  <div className="ea-step-header">
-                    <h2>What best describes you?</h2>
-                  </div>
-                  <div className="ea-options">
-                    {roleOptions.map((r) => (
-                      <motion.button
-                        key={r}
-                        className={`ea-option ${role === r ? 'selected' : ''}`}
-                        onClick={() => { setRole(r); setTimeout(() => scrollToSection('signup'), 400); }}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        {r}
-                      </motion.button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.section>
-
-        {/* Signup / Offer Screen */}
-        <motion.section 
-          className="ea-signup" id="signup"
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.7 }}
-        >
-          <div className="ea-signup-container">
             <AnimatePresence mode="wait">
               {isSubmitted ? (
                 <motion.div 
@@ -569,44 +470,148 @@ export default function EarlyAccessPage() {
                   </div>
                 </motion.div>
               ) : (
-                <motion.div key="signup-form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  <form className="ea-form" onSubmit={handleSignup} noValidate>
-                    <div className="ea-form-group">
-                      <label>Email *</label>
-                      <input
-                        type="email"
-                        required
-                        placeholder="you@company.com"
-                        value={email}
-                        onChange={(e) => {
-                          setEmail(e.target.value);
-                          if (emailError) setEmailError('');
-                        }}
-                        className={emailError ? 'has-error' : ''}
-                      />
+                <motion.div key="form-flow" initial={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <div className="ea-onboarding-step">
+                    <div className="ea-step-header">
+                      <h2>1. What would make Plexis indispensable to you?</h2>
                       <AnimatePresence>
-                        {emailError && (
-                          <motion.div 
-                            className="ea-error-msg"
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
+                        {feedbackOptions.length > 0 && (
+                          <motion.span 
+                            className="ea-counter-badge"
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
                           >
-                            {emailError}
-                          </motion.div>
+                            {feedbackOptions.length} selected
+                          </motion.span>
                         )}
                       </AnimatePresence>
                     </div>
-                    <motion.button 
-                      type="submit" 
-                      className="ea-btn ea-btn-primary full-width"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? 'Joining...' : 'Get Early Access →'}
-                    </motion.button>
-                  </form>
+                    <div className="ea-options">
+                      {featureOptions.map((opt) => (
+                        <motion.button
+                          key={opt}
+                          className={`ea-option ${feedbackOptions.includes(opt) ? 'selected' : ''}`}
+                          onClick={() => toggleOption(opt)}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          {opt}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {feedbackOptions.length > 0 && (
+                      <motion.div 
+                        className="ea-onboarding-step"
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: 'auto', marginTop: '2rem' }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        transition={{ duration: 0.4 }}
+                      >
+                        <div className="ea-step-header">
+                          <h2>2. Tell us what you're trying to solve.</h2>
+                        </div>
+                        <div className="ea-textarea-container">
+                          <textarea
+                            className="ea-textarea"
+                            placeholder="What do you wish you could do with your data in a few clicks?"
+                            value={feedbackText}
+                            maxLength={1000}
+                            onChange={(e) => setFeedbackText(e.target.value)}
+                          />
+                          <div className="ea-char-counter">
+                            {feedbackText.length}/1000
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <AnimatePresence>
+                    {(feedbackOptions.length > 0 && feedbackText.length > 2) && (
+                      <motion.div 
+                        className="ea-onboarding-step"
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: 'auto', marginTop: '2rem' }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        transition={{ duration: 0.4 }}
+                      >
+                        <div className="ea-step-header">
+                          <h2>3. What best describes your role?</h2>
+                        </div>
+                        <div className="ea-options">
+                          {roleOptions.map((r) => (
+                            <motion.button
+                              key={r}
+                              className={`ea-option ${role === r ? 'selected' : ''}`}
+                              onClick={() => { setRole(r); }}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              {r}
+                            </motion.button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <AnimatePresence>
+                    {(feedbackOptions.length > 0 && feedbackText.length > 2 && role !== '') && (
+                      <motion.div 
+                        className="ea-onboarding-step"
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: 'auto', marginTop: '2rem' }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        transition={{ duration: 0.4 }}
+                      >
+                        <div className="ea-step-header">
+                          <h2>4. Where should we send your invite?</h2>
+                        </div>
+                        <form className="ea-form" onSubmit={handleSignup} noValidate>
+                          <div className="ea-form-group">
+                            <input
+                              type="email"
+                              required
+                              placeholder="you@company.com"
+                              value={email}
+                              onChange={(e) => {
+                                setEmail(e.target.value);
+                                if (emailError) setEmailError('');
+                              }}
+                              className={emailError ? 'has-error' : ''}
+                            />
+                            <AnimatePresence>
+                              {emailError && (
+                                <motion.div 
+                                  className="ea-error-msg"
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                >
+                                  {emailError}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                          <motion.button 
+                            type="submit" 
+                            className="ea-btn ea-btn-primary full-width"
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            disabled={isSubmitting}
+                            style={{ marginTop: '1rem' }}
+                          >
+                            {isSubmitting ? 'Joining...' : 'Get Early Access →'}
+                          </motion.button>
+                        </form>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                 </motion.div>
               )}
             </AnimatePresence>
