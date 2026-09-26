@@ -48,9 +48,12 @@ export default function EarlyAccessPage() {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/early-access`, {
+      await fetch('https://script.google.com/macros/s/AKfycbwJUdAipw7EIWSLy83azIYSMAbx52yR_x24hzhGx8pW0TTg-3AcnvpO8imHO_hDQptv/exec', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
         body: JSON.stringify({
           email,
           role,
@@ -59,11 +62,7 @@ export default function EarlyAccessPage() {
         })
       });
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Submission failed');
-      }
+      // With no-cors, the response is opaque, so we just assume success if no network error occurred.
       
       setIsSubmitted(true);
       setShowNotification(true);
