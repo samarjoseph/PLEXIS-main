@@ -19,8 +19,20 @@ import EvidenceCard from './EvidenceCard.jsx';
 import SpreadsheetResultCard from './SpreadsheetResultCard.jsx';
 import AnalyticalResultCard from './AnalyticalResultCard.jsx';
 import VerticalActionMenu from './VerticalActionMenu.jsx';
+import TransformPlanCard from './TransformPlanCard.jsx';
+import TransformResultCard from './TransformResultCard.jsx';
+import TransformationClarificationCard from './TransformationClarificationCard.jsx';
 
-export default function MessageBubbleV2({ message, onRetry }) {
+export default function MessageBubbleV2({
+  message,
+  onRetry,
+  onApplyTransform,
+  onCancelTransform,
+  onClarificationAction,
+  onUndoTransform,
+  onExportDataset,
+  isApplyingTransform,
+}) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -86,6 +98,62 @@ export default function MessageBubbleV2({ message, onRetry }) {
           </button>
         </div>
       </motion.div>
+    );
+  }
+
+  /* ── Transformation Plan ── */
+  if (message.transformationClarification) {
+    return (
+      <div className="v2-msg-ai">
+        <div className="v2-msg-ai-avatar v2-msg-ai-avatar--gradient">
+          <PlexisLogo width={17} height={17} />
+        </div>
+        <div className="v2-msg-ai-body">
+          <TransformationClarificationCard
+            clarification={message.transformationClarification}
+            onAction={onClarificationAction}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Transformation Plan ── */
+  if (message.transformPlan) {
+    return (
+      <div className="v2-msg-ai">
+        <div className="v2-msg-ai-avatar v2-msg-ai-avatar--gradient">
+          <PlexisLogo width={17} height={17} />
+        </div>
+        <div className="v2-msg-ai-body">
+          <TransformPlanCard
+            plan={message.transformPlan}
+            datasetId={message.datasetId}
+            onApply={onApplyTransform}
+            onCancel={onCancelTransform}
+            transformationUpdate={message.transformationUpdate}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Transformation Result ── */
+  if (message.transformResult) {
+    return (
+      <div className="v2-msg-ai">
+        <div className="v2-msg-ai-avatar v2-msg-ai-avatar--gradient">
+          <PlexisLogo width={17} height={17} />
+        </div>
+        <div className="v2-msg-ai-body">
+          <TransformResultCard
+            result={message.transformResult}
+            datasetId={message.datasetId}
+            onUndo={onUndoTransform}
+            onExport={onExportDataset}
+          />
+        </div>
+      </div>
     );
   }
 

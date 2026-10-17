@@ -1,20 +1,26 @@
 """
 Model registry and metadata definitions for LLM providers.
 
-NEW MODEL HIERARCHY (2026-08-25):
-  PRIMARY:   groq / openai/gpt-oss-20b         — conversation, planner, all tasks
-  FALLBACK:  groq / Qwen/Qwen3.6-27B-A3B-Instruct — conversation fallback, planner fallback
-  HIGH-REASONING: groq / openai/gpt-oss-120b   — complex reasoning, high-quality analysis
-
-DEPRECATED (health_score=0.0, will not be selected):
-  llama-3.3-70b-versatile  → replaced by openai/gpt-oss-20b
-  gemini-1.5-pro           → replaced by openai/gpt-oss-120b
-  gemini-2.0-flash         → Gemini removed from normal conversation chain
-  mistral-medium-latest    → Qwen/Qwen3.6-27B-A3B-Instruct replaces as fallback
+Authoritative Provider & Role Architecture:
+1. Router Role:
+   - Primary:   mistral / mistral-small-latest (priority 0)
+   - Fallback:  nvidia / google/diffusiongemma-26b-a4b-it (priority 1)
+2. Analysis Role:
+   - Primary:        openrouter / google/gemma-2-27b-it:free (priority 0)
+   - Model Fallback: openrouter / nvidia/nemotron-3-super-120b-a12b:free (priority 1)
+   - Secondary:      gemini / gemini-2.0-flash (priority 2)
+3. Transformation Role:
+   - Dedicated:      gemini / gemini-2.0-flash (priority 0)
+   - NO cross-role fallback to Mistral or Nvidia NIM.
+4. Conversation Role:
+   - Primary:        openrouter / google/gemma-2-27b-it:free (priority 0)
+   - Model Fallback: openrouter / nvidia/nemotron-3-super-120b-a12b:free (priority 1)
+   - Secondary:      gemini / gemini-2.0-flash (priority 2)
 """
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 import logging
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -36,20 +42,22 @@ class ModelMetadata:
     estimated_cost_per_1k: float = 0.0
     reliability_score: float = 1.0
     health_score: float = 1.0
-    priority: int = 0
+    priority: int = 0  # Lower number = higher priority
 
 
 class ModelRegistry:
-    """Registry to manage metadata for all available models."""
+    """Registry to manage metadata and role matching for all available models."""
 
     def __init__(self):
         self._models: Dict[str, ModelMetadata] = {}
 
     def register(self, model: ModelMetadata) -> None:
-        """Register a new model."""
+        """Register a model with metadata."""
         self._models[model.model_id] = model
-        logger.debug("Registered model %s (provider=%s health=%.1f)",
-                     model.model_id, model.provider, model.health_score)
+        logger.debug(
+            "[ModelRegistry] Registered model %s (provider=%s health=%.1f priority=%d)",
+            model.model_id, model.provider, model.health_score, model.priority
+        )
 
     def get(self, model_id: str) -> Optional[ModelMetadata]:
         """Get model metadata by ID."""
@@ -57,25 +65,28 @@ class ModelRegistry:
 
     def get_models_for_provider(self, provider: str) -> List[ModelMetadata]:
         """Get all ACTIVE (health_score > 0.3) models for a specific provider."""
-        return [m for m in self._models.values()
-                if m.provider == provider and m.health_score > 0.3]
+        return [
+            m for m in self._models.values()
+            if m.provider == provider.lower() and m.health_score > 0.3
+        ]
 
     def get_models_for_task(self, task: str, require_json: bool = False) -> List[ModelMetadata]:
         """
-        Get models ranked for a specific task.
-        Only returns models with health_score > 0.3.
-        Sorted by: priority ASC, task affinity DESC.
+        Get all active models eligible for a task, sorted by priority (ascending)
+        and then task affinity (descending).
         """
+        task_clean = (task or "").lower().strip()
         result = []
         for m in self._models.values():
             if m.health_score <= 0.3:
                 continue
             if require_json and not m.supports_json_mode:
                 continue
-            affinity = m.task_affinities.get(task, 0.0)
+            affinity = m.task_affinities.get(task_clean, 0.0)
             if affinity > 0:
                 result.append(m)
-        result.sort(key=lambda m: (m.priority, -m.task_affinities.get(task, 0.0)))
+
+        result.sort(key=lambda m: (m.priority, -m.task_affinities.get(task_clean, 0.0)))
         return result
 
     def all_models(self) -> List[ModelMetadata]:
@@ -91,12 +102,10 @@ class ModelRegistry:
             self._models[model_id].health_score = max(0.0, min(1.0, score))
 
     def mark_permanently_failed(self, model_id: str) -> None:
-        """Mark a model as permanently unavailable (404 / model not found)."""
+        """Mark a model as permanently unavailable (e.g. 404 / decommissioned)."""
         if model_id in self._models:
             self._models[model_id].health_score = 0.0
-            logger.warning(
-                "[ModelRegistry] Model marked permanently unavailable: %s", model_id
-            )
+            logger.warning("[ModelRegistry] Model permanently unavailable: %s", model_id)
 
     def update_latency(self, model_id: str, latency_ms: float) -> None:
         if model_id in self._models:
@@ -112,213 +121,187 @@ class ModelRegistry:
 
 model_registry = ModelRegistry()
 
-# ── NEW GROQ MODELS (primary provider hierarchy) ──────────────────────────────
-# All Groq models use the same Groq API; model name determines capability tier.
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. ROUTER ROLE MODELS
+# ══════════════════════════════════════════════════════════════════════════════
 
-# PRIMARY: GPT-OSS 20B — conversation, planner, all standard tasks
+# PRIMARY ROUTER: Mistral Small (Priority 0)
 model_registry.register(ModelMetadata(
-    model_id="openai/gpt-oss-20b",
-    provider="groq",
-    model_name="openai/gpt-oss-20b",
-    context_window=128000,
-    max_output_tokens=8192,
+    model_id=Config.ROUTER_MISTRAL_MODEL,
+    provider="mistral",
+    model_name=Config.ROUTER_MISTRAL_MODEL,
+    context_window=32768,
+    max_output_tokens=4096,
     supports_vision=False,
     supports_json_mode=True,
     supports_tool_calling=True,
     supports_streaming=True,
     supports_reasoning=False,
     task_affinities={
-        "chat": 1.0,
-        "conversation": 1.0,
-        "planner": 1.0,
-        "presentation": 1.0,
-        "report": 1.0,
         "classification": 1.0,
-        "spreadsheet_interpret": 1.0,
         "router": 1.0,
-        "explanation": 1.0,
-        "title": 1.0,
-        "search": 0.9,
-        "stream": 1.0,
-        "fallback": 1.0,
-        # Investigation engine tasks
-        "interpreter": 1.0,
-        "insight_synthesizer": 1.0,
-        "analysis": 1.0,
     },
-    avg_latency_ms=600.0,
-    estimated_cost_per_1k=0.0,
-    reliability_score=1.0,
+    avg_latency_ms=450.0,
+    priority=0,
     health_score=1.0,
-    priority=0,  # Highest priority
 ))
 
-# DEPRECATED: Qwen 3.6 27B — decommissioned on Groq; health_score=0.0 ensures never selected
+# SECONDARY ROUTER: NVIDIA NIM Direct (Priority 1 fallback)
 model_registry.register(ModelMetadata(
-    model_id="Qwen/Qwen3.6-27B-A3B-Instruct",
-    provider="groq",
-    model_name="Qwen/Qwen3.6-27B-A3B-Instruct",
+    model_id=Config.ROUTER_NVIDIA_MODEL,
+    provider="nvidia",
+    model_name=Config.ROUTER_NVIDIA_MODEL,
     context_window=128000,
-    max_output_tokens=8192,
-    supports_vision=False,
+    max_output_tokens=4096,
+    supports_vision=True,
     supports_json_mode=True,
-    supports_tool_calling=True,
+    supports_tool_calling=False,
     supports_streaming=True,
-    supports_reasoning=True,
-    task_affinities={},
-    avg_latency_ms=0.0,
-    estimated_cost_per_1k=0.0,
-    reliability_score=0.0,
-    health_score=0.0,  # PERMANENTLY DISABLED — model decommissioned on Groq
-    priority=99,
-))
-
-# HIGH-REASONING: GPT-OSS 120B — complex queries, high-reasoning fallback
-model_registry.register(ModelMetadata(
-    model_id="openai/gpt-oss-120b",
-    provider="groq",
-    model_name="openai/gpt-oss-120b",
-    context_window=128000,
-    max_output_tokens=8192,
-    supports_vision=False,
-    supports_json_mode=True,
-    supports_tool_calling=True,
-    supports_streaming=True,
-    supports_reasoning=True,
+    supports_reasoning=False,
     task_affinities={
-        "chat": 0.8,
-        "conversation": 0.8,
-        "planner": 0.8,
-        "high_reasoning": 1.0,
-        "complex_analysis": 1.0,
-        "presentation": 0.8,
-        "report": 0.8,
-        "classification": 0.8,
-        "spreadsheet_interpret": 0.8,
-        "explanation": 0.85,
-        "fallback": 0.8,
-        # Investigation engine tasks
-        "interpreter": 0.9,
-        "insight_synthesizer": 0.9,
-        "analysis": 0.9,
+        "classification": 0.9,
+        "router": 0.9,
     },
-    avg_latency_ms=2000.0,
-    estimated_cost_per_1k=0.0,
-    reliability_score=1.0,
+    avg_latency_ms=550.0,
+    priority=1,
     health_score=1.0,
-    priority=2,  # Third priority — for high-complexity or when others fail
 ))
 
-# ── OPENROUTER (disabled — credentials unavailable / not configured) ──────────
-# These remain for future re-enabling if OpenRouter credentials are provided.
-# Set health_score=0.0 so ModelRegistry.get_models_for_task() never returns them.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. ANALYSIS & CONVERSATION ROLE MODELS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# PRIMARY ANALYSIS & CONVERSATION: OpenRouter Gemma (Priority 0)
 model_registry.register(ModelMetadata(
-    model_id="deepseek/deepseek-chat-v3",
+    model_id=Config.ANALYSIS_OPENROUTER_MODEL,
     provider="openrouter",
-    model_name="deepseek/deepseek-chat-v3",
+    model_name=Config.ANALYSIS_OPENROUTER_MODEL,
     context_window=131072,
     max_output_tokens=8192,
-    supports_vision=False,
-    supports_json_mode=True,
-    supports_tool_calling=True,
-    supports_streaming=True,
-    supports_reasoning=False,
-    task_affinities={
-        "chat": 0.6,
-        "conversation": 0.6,
-        "planner": 0.6,
-        "report": 0.7,
-        "classification": 0.6,
-        "spreadsheet_interpret": 0.7,
-        "fallback": 0.7,
-    },
-    avg_latency_ms=2000.0,
-    estimated_cost_per_1k=0.27,
-    reliability_score=0.95,
-    health_score=0.0,   # DISABLED — OpenRouter not configured; enable by setting health_score=1.0
-    priority=99,
-))
-
-model_registry.register(ModelMetadata(
-    model_id="meta-llama/llama-4-maverick",
-    provider="openrouter",
-    model_name="meta-llama/llama-4-maverick",
-    context_window=1048576,
-    max_output_tokens=32768,
     supports_vision=True,
     supports_json_mode=True,
     supports_tool_calling=True,
     supports_streaming=True,
     supports_reasoning=False,
     task_affinities={
-        "chat": 0.5,
-        "conversation": 0.5,
-        "planner": 0.5,
-        "spreadsheet_interpret": 0.6,
-        "fallback": 0.6,
+        # Analysis tasks
+        "planner": 1.0,
+        "interpreter": 1.0,
+        "insight_synthesizer": 1.0,
+        "explanation": 1.0,
+        "spreadsheet_interpret": 1.0,
+        "analysis": 1.0,
+        "complex_analysis": 1.0,
+        "report": 1.0,
+        # Conversation tasks
+        "chat": 1.0,
+        "conversation": 1.0,
+        "presentation": 1.0,
+        "title": 1.0,
+        "stream": 1.0,
     },
-    avg_latency_ms=1800.0,
-    estimated_cost_per_1k=0.20,
-    reliability_score=0.90,
-    health_score=0.0,   # DISABLED — OpenRouter not configured; enable by setting health_score=1.0
-    priority=99,
+    avg_latency_ms=650.0,
+    priority=0,
+    health_score=1.0,
 ))
 
-# ── DEPRECATED — health_score=0.0 ensures they are NEVER selected ─────────────
-# These remain in the registry for observability/audit only.
-
+# MODEL-LEVEL FALLBACK: OpenRouter Nemotron 3 Super (Priority 1)
 model_registry.register(ModelMetadata(
-    model_id="llama-3.3-70b-versatile",
-    provider="groq",
-    model_name="llama-3.3-70b-versatile",
-    context_window=32768, max_output_tokens=8192,
-    supports_vision=False, supports_json_mode=True, supports_tool_calling=True,
-    supports_streaming=True, supports_reasoning=False,
-    task_affinities={},
-    avg_latency_ms=0.0, estimated_cost_per_1k=0.0,
-    reliability_score=0.0,
-    health_score=0.0,  # PERMANENTLY DISABLED — 404 on Groq API
-    priority=99,
+    model_id=Config.ANALYSIS_OPENROUTER_FALLBACK_MODEL,
+    provider="openrouter",
+    model_name=Config.ANALYSIS_OPENROUTER_FALLBACK_MODEL,
+    context_window=128000,
+    max_output_tokens=8192,
+    supports_vision=False,
+    supports_json_mode=True,
+    supports_tool_calling=True,
+    supports_streaming=True,
+    supports_reasoning=True,
+    task_affinities={
+        # Analysis tasks
+        "planner": 0.9,
+        "interpreter": 0.9,
+        "insight_synthesizer": 0.9,
+        "explanation": 0.9,
+        "spreadsheet_interpret": 0.9,
+        "analysis": 0.9,
+        "complex_analysis": 1.0,
+        "report": 0.9,
+        "high_reasoning": 1.0,
+        # Conversation tasks
+        "chat": 0.9,
+        "conversation": 0.9,
+        "presentation": 0.9,
+        "title": 0.9,
+        "stream": 0.9,
+    },
+    avg_latency_ms=900.0,
+    priority=1,
+    health_score=1.0,
 ))
 
+# SECONDARY PROVIDER (Analysis & Conversation): Google Gemini (Priority 2)
+# AND PRIMARY DEDICATED PROVIDER FOR TRANSFORMATION (Priority 0)
 model_registry.register(ModelMetadata(
-    model_id="gemini-2.0-flash",
+    model_id=Config.TRANSFORMATION_GEMINI_MODEL,
     provider="gemini",
-    model_name="gemini-2.0-flash",
-    context_window=1048576, max_output_tokens=8192,
-    supports_vision=True, supports_json_mode=True, supports_tool_calling=True,
-    supports_streaming=True, supports_reasoning=False,
-    task_affinities={},
-    avg_latency_ms=0.0, estimated_cost_per_1k=0.0,
-    reliability_score=0.0,
-    health_score=0.0,  # DEPRECATED — Gemini removed from normal routing
-    priority=99,
+    model_name=Config.TRANSFORMATION_GEMINI_MODEL,
+    context_window=1048576,
+    max_output_tokens=8192,
+    supports_vision=True,
+    supports_json_mode=True,
+    supports_tool_calling=True,
+    supports_streaming=True,
+    supports_reasoning=True,
+    task_affinities={
+        # Dedicated Transformation Role (Priority 0 for transformation)
+        "transformation_planning": 1.0,
+        "transformation": 1.0,
+        # Secondary Analysis & Conversation (Priority 2 fallback)
+        "planner": 0.8,
+        "interpreter": 0.8,
+        "insight_synthesizer": 0.8,
+        "explanation": 0.8,
+        "spreadsheet_interpret": 0.8,
+        "analysis": 0.8,
+        "complex_analysis": 0.8,
+        "report": 0.8,
+        "chat": 0.8,
+        "conversation": 0.8,
+        "presentation": 0.8,
+        "title": 0.8,
+        "stream": 0.8,
+    },
+    avg_latency_ms=750.0,
+    priority=2,  # Will be treated as priority 0 when task is transformation_planning
+    health_score=1.0,
 ))
 
-model_registry.register(ModelMetadata(
-    model_id="gemini-1.5-pro",
-    provider="gemini",
-    model_name="gemini-1.5-pro",
-    context_window=2000000, max_output_tokens=8192,
-    supports_vision=True, supports_json_mode=True, supports_tool_calling=True,
-    supports_streaming=True, supports_reasoning=True,
-    task_affinities={},
-    avg_latency_ms=0.0, estimated_cost_per_1k=0.0,
-    reliability_score=0.0,
-    health_score=0.0,  # DEPRECATED — 404 on Gemini API
-    priority=99,
-))
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. MOCK PROVIDER (testing only)
+# ══════════════════════════════════════════════════════════════════════════════
 model_registry.register(ModelMetadata(
-    model_id="mistral-medium-latest",
-    provider="mistral",
-    model_name="mistral-medium-latest",
-    context_window=32768, max_output_tokens=8192,
-    supports_vision=False, supports_json_mode=True, supports_tool_calling=True,
-    supports_streaming=True, supports_reasoning=False,
-    task_affinities={},
-    avg_latency_ms=0.0, estimated_cost_per_1k=0.0,
-    reliability_score=0.0,
-    health_score=0.0,  # DEPRECATED — replaced by Qwen as fallback
+    model_id="mock",
+    provider="mock",
+    model_name="mock",
+    context_window=1024,
+    max_output_tokens=1024,
+    supports_vision=False,
+    supports_json_mode=True,
+    supports_tool_calling=False,
+    supports_streaming=False,
+    supports_reasoning=False,
+    task_affinities={
+        "classification": 1.0,
+        "router": 1.0,
+        "planner": 1.0,
+        "chat": 1.0,
+        "conversation": 1.0,
+        "transformation_planning": 1.0,
+        "transformation": 1.0,
+    },
     priority=99,
+    health_score=0.0,  # Enabled dynamically in tests
 ))

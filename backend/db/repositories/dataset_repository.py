@@ -117,7 +117,7 @@ class DatasetRepository:
         self,
         db: Session,
         dataset_id: UUID,
-        user_id: UUID,
+        user_id: Optional[UUID] = None,
     ) -> Optional[Dataset]:
         """
         Fetch Dataset by UUID, verifying ownership.
@@ -140,7 +140,7 @@ class DatasetRepository:
         self,
         db: Session,
         dataset_id: UUID,
-        user_id: UUID,
+        user_id: Optional[UUID] = None,
     ) -> Optional[bytes]:
         """
         Retrieve and decompress the file content for a Dataset.
@@ -148,7 +148,11 @@ class DatasetRepository:
         Verifies ownership. Returns raw (uncompressed) bytes.
         Returns None if dataset or file not found/not owned.
         """
-        dataset = self.get_by_id(db, dataset_id, user_id)
+        if user_id is not None:
+            dataset = self.get_by_id(db, dataset_id, user_id)
+        else:
+            dataset = self.get_by_id_unsafe(db, dataset_id)
+            
         if not dataset:
             logger.warning("[DATASET_REPO] get_file_bytes: dataset %s not found or not owned by %s", dataset_id, user_id)
             return None

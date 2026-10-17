@@ -39,9 +39,13 @@ import {
   Hash,
   HardDrive,
   Columns,
+  Microscope,
 } from 'lucide-react';
 import { exportChartAsPNG, exportChartDataAsCSV } from '../../utils/chartExport';
 import UITooltip from '../ui/Tooltip';
+import InvestigationView from './InvestigationView';
+import { EventBus } from '../../events/EventBus';
+import { Events } from '../../events/Events';
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, BarElement,
@@ -211,10 +215,19 @@ export default function AnalyticsPanelV2({
   chartData, chartType, onChartTypeChange,
   collapsed, onToggleCollapse,
   datasetName, datasetStats,
+  activeDatasetId,
 }) {
   const chartRef = useRef(null);
   const [fullscreen, setFullscreen] = useState(false);
   const isDesktop = useIsDesktop();
+  const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'investigation'
+
+  // Switch to Investigation tab when INVESTIGATION_REQUESTED event fires
+  useEffect(() => {
+    const handler = () => setActiveTab('investigation');
+    EventBus.on(Events.INVESTIGATION_REQUESTED, handler);
+    return () => EventBus.off(Events.INVESTIGATION_REQUESTED, handler);
+  }, []);
 
   // Resizing state
   const [panelW, setPanelW] = useState(420);
@@ -282,7 +295,27 @@ export default function AnalyticsPanelV2({
         />
       )}
       <div className="v2-analytics-header">
-        <h3>Analytics</h3>
+        <div className="v2-analytics-tabs">
+          <button
+            type="button"
+            className={`v2-analytics-tab ${activeTab === 'analytics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('analytics')}
+          >
+            <BarChart3 size={13} />
+            Analytics
+          </button>
+          <button
+            type="button"
+            className={`v2-analytics-tab ${activeTab === 'investigation' ? 'active' : ''}`}
+            onClick={() => setActiveTab('investigation')}
+          >
+            <Microscope size={13} />
+            Investigation
+            {activeDatasetId && (
+              <span className="v2-analytics-tab-dot" title="Investigation available" />
+            )}
+          </button>
+        </div>
         <div className="v2-analytics-header-actions" style={{ gap: '14px' }}>
           <UITooltip label="Fullscreen" side="bottom">
             <button
@@ -305,6 +338,24 @@ export default function AnalyticsPanelV2({
         </div>
       </div>
 
+      {/* ── Investigation Tab ── */}
+      {activeTab === 'investigation' && (
+        <div className="v2-analytics-investigation-pane">
+          {activeDatasetId ? (
+            <InvestigationView datasetId={activeDatasetId} />
+          ) : (
+            <div className="v2-analytics-empty-section" style={{ padding: '32px 16px', textAlign: 'center' }}>
+              <Microscope size={24} color="var(--dash-dim)" style={{ marginBottom: '10px' }} />
+              <p style={{ color: 'var(--dash-dim)', fontSize: '13px' }}>
+                Upload a dataset to see the investigation report.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Analytics Tab ── */}
+      {activeTab === 'analytics' && (
       <div className="v2-analytics-content">
         {/* Dataset Information */}
         <div className="v2-analytics-section">
@@ -456,6 +507,7 @@ export default function AnalyticsPanelV2({
           </div>
         </div>
       </div>
+      )} {/* end activeTab === 'analytics' */}
     </motion.aside>
   );
 }

@@ -175,4 +175,5 @@ else:
     print(f"WARNING: {FAIL} FAILURE(S)")
 print("=" * 60)
 
-sys.exit(0 if FAIL == 0 else 1)
+if __name__ == '__main__':
+    sys.exit(0 if FAIL == 0 else 1)

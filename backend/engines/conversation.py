@@ -258,6 +258,26 @@ class ConversationEngine(BaseEngine):
             plan=plan,
         )
 
+        # Extract deterministic dataset schema context
+        schema_profile = getattr(context, 'schema_profile', None)
+        dataset_id = getattr(context, 'dataset_id', None)
+        dataset_version = None
+        schema_context = None
+        
+        if schema_profile and isinstance(schema_profile, dict):
+            # The schema_profile is usually a dict containing 'columns' and 'types'
+            schema_context = {
+                "dataset_id": str(dataset_id) if dataset_id else "unknown",
+                "schema": list(schema_profile.keys()) if isinstance(schema_profile, dict) and not 'columns' in schema_profile else schema_profile.get('columns', [])
+            }
+            # Depending on how schema_profile is structured in Plexis...
+            # A common structure is {"columns": ["id", "name"], "types": {...}} or just {"id": "int", ...}
+            if isinstance(schema_profile, dict):
+                if 'columns' in schema_profile:
+                    schema_context['schema'] = schema_profile['columns']
+                else:
+                    schema_context['schema'] = list(schema_profile.keys())
+
         # Build the structured context block for the LLM
         context_block = build_context_block(
             message=message,
@@ -265,6 +285,7 @@ class ConversationEngine(BaseEngine):
             conversation_history=conversation_history,
             dataset_filename=dataset_filename,
             facts=None,
+            schema_context=schema_context,
         )
 
         # Generate the response

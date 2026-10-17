@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Spreadsheet — the main spreadsheet orchestrator component.
  *
  * Architecture:
@@ -157,6 +157,50 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
   hiddenColsRef.current  = hiddenCols;
   stableColsRef.current  = colModel.filter(c => !hiddenCols.has(c.name));
 
+  // ── Data fetching ─────────────────────────────────────────────────────────
+
+  const fetchWindow = useCallback(async (offset) => {
+    if (!datasetId) return;
+    const cache = cacheRef.current;
+    if (cache.isPending(offset)) return;
+    cache.markPending(offset);
+    const requestedCacheVersion = cache.version;
+
+    try {
+      const result = await PlexisAPI.getDatasetWindow(
+        datasetId,
+        offset,
+        FETCH_WINDOW,
+        sort?.col,
+        sort?.dir,
+        search,
+        filters[0]?.col,
+        filters[0]?.val,
+      );
+
+      // Ignore a response that raced with apply/undo or a view invalidation.
+      if (cacheRef.current.version !== requestedCacheVersion) return;
+
+      cache.setWindow(offset, result.rows ?? []);
+      if (result.filename) setFilename(result.filename);
+
+      // Trigger re-render so grid picks up newly cached rows
+      setRenderTick(t => t + 1);
+    } catch (err) {
+      console.error('[Spreadsheet] fetchWindow error:', err);
+      // Remove from pending so retry is possible
+      cacheRef.current.pendingOffsets?.delete(offset);
+    }
+  }, [datasetId, sort, filters, search]);
+
+  const maybeFetch = useCallback((startRow, endRow) => {
+    const cache = cacheRef.current;
+    const missing = cache.firstMissingWindow(startRow, endRow);
+    if (missing !== null && missing < totalRowsRef.current) {
+      fetchWindow(missing);
+    }
+  }, [fetchWindow]);
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const visibleCols = useMemo(
@@ -199,6 +243,22 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     maybeFetch(0, Math.min(40, totalRowsRef.current - 1));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort, filters, search]);
+
+  // Transformations update the backend dataframe without changing the current
+  // view controls. Drop cached windows so the grid re-reads the applied/undone
+  // values from the same dataset version.
+  useEffect(() => {
+    const refreshRows = ({ datasetId: changedDatasetId } = {}) => {
+      if (!datasetId || changedDatasetId !== datasetId) return;
+      cacheRef.current.invalidate();
+      setVirtualRange({ startRow: 0, endRow: 0 });
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      maybeFetch(0, Math.min(FETCH_WINDOW - 1, totalRowsRef.current - 1));
+    };
+    const offApplied = EventBus.on(Events.TRANSFORM_APPLIED, refreshRows);
+    const offUndone = EventBus.on(Events.TRANSFORM_UNDONE, refreshRows);
+    return () => { offApplied(); offUndone(); };
+  }, [datasetId, maybeFetch]);
 
   // ── Evidence render instructions ──────────────────────────────────────────
 
@@ -258,45 +318,6 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     setSelection(Array.from(selectedRows), Array.from(selectedCols));
   }, [selectedRows, selectedCols, setSelection]);
 
-  // ── Data fetching ─────────────────────────────────────────────────────────
-
-  const fetchWindow = useCallback(async (offset) => {
-    if (!datasetId) return;
-    const cache = cacheRef.current;
-    if (cache.isPending(offset)) return;
-    cache.markPending(offset);
-
-    try {
-      const result = await PlexisAPI.getDatasetWindow(
-        datasetId,
-        offset,
-        FETCH_WINDOW,
-        sort?.col,
-        sort?.dir,
-        search,
-        filters[0]?.col,
-        filters[0]?.val,
-      );
-
-      cache.setWindow(offset, result.rows ?? []);
-      if (result.filename) setFilename(result.filename);
-
-      // Trigger re-render so grid picks up newly cached rows
-      setRenderTick(t => t + 1);
-    } catch (err) {
-      console.error('[Spreadsheet] fetchWindow error:', err);
-      // Remove from pending so retry is possible
-      cacheRef.current.pendingOffsets?.delete(offset);
-    }
-  }, [datasetId, sort, filters, search]);
-
-  const maybeFetch = useCallback((startRow, endRow) => {
-    const cache = cacheRef.current;
-    const missing = cache.firstMissingWindow(startRow, endRow);
-    if (missing !== null && missing < totalRowsRef.current) {
-      fetchWindow(missing);
-    }
-  }, [fetchWindow]);
 
   // ── getRow — used by SpreadsheetGrid ─────────────────────────────────────
 
@@ -704,20 +725,7 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
   }, [jumpToRow]);
 
   // ── Listen for card actions from main chat (Locate/Undo/Redo on chat cards) ─
-  useEffect(() => {
-    const unsub = EventBus.on(Events.SPREADSHEET_CARD_ACTION, ({ action }) => {
-      if (action === 'locate') {
-        handleLocate?.();
-      } else if (action === 'undo') {
-        handleOpUndo?.();
-      } else if (action === 'redo') {
-        handleOpRedo?.();
-      }
-    });
-    return unsub;
-  // handleLocate/handleOpUndo/handleOpRedo are stable useCallback refs — safe dep
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
 
   // ── AI / Ask Agent ────────────────────────────────────────────────────────
 
@@ -932,7 +940,7 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     });
   }, []);
 
-  const handleOpUndo = useCallback(() => {
+  function handleOpUndo() {
     if (currentOpIndex < 0) return;
     // Push current op to redo stack before clearing
     const currentOp = operationHistory[currentOpIndex];
@@ -945,9 +953,9 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     const prevOp = operationHistory[currentOpIndex - 1];
     if (prevOp) setActiveOperation(prevOp);
     else { setOpPanelVisible(false); setActiveOperation(null); }
-  }, [currentOpIndex, operationHistory, clearHighlights]);
+  }
 
-  const handleOpRedo = useCallback(() => {
+  function handleOpRedo() {
     if (redoStack.length === 0) return;
     const [nextOp, ...rest] = redoStack;
     setRedoStack(rest);
@@ -967,7 +975,7 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     setCurrentOpIndex(prev => prev + 1);
     setActiveOperation(nextOp);
     setOpPanelVisible(true);
-  }, [redoStack, jumpToRow]);
+  }
 
   // ── Locate: translate original row indices → current display positions ─────
   //
@@ -1039,12 +1047,12 @@ export default function Spreadsheet({ onClose, viewMode, onViewModeChange }) {
     applyHighlight(displayIndices, displayIndices[0]);
   }, [jumpToRow, fetchWindow]);
 
-  const handleLocate = useCallback(() => {
+  function handleLocate() {
     const op = activeOperation;
     if (!op?.result?.rowIndices?.length) return;
     const col = op.result.resultColumn || op.params?.column || null;
     locateByOriginalIndices(op.result.rowIndices, col);
-  }, [activeOperation, locateByOriginalIndices]);
+  }
 
 
   // ── Listen for card actions from main chat (Locate/Undo/Redo on chat cards) ─

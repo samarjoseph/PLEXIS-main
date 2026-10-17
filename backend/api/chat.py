@@ -145,6 +145,15 @@ engine_registry.register(conversation_engine, ['conversation', 'title_generation
 engine_registry.register(analysis_engine, ['analysis'])
 # web_search intent currently has no engine — router falls back to conversation
 
+# Register transformation and investigation engines
+try:
+    from engines.transform import transform_engine
+    from engines.investigate import investigate_engine
+    engine_registry.register(transform_engine, ['transform'])
+    engine_registry.register(investigate_engine, ['investigate'])
+except ImportError as e:
+    logger.warning("[chat] Transform/Investigate engines not loaded: %s", e)
+
 @chat_bp.route('/ask', methods=['POST'])
 def ask():
     """
@@ -201,7 +210,10 @@ def ask():
         evidence_dict = None
         if final_result.evidence is not None:
             try:
-                evidence_dict = final_result.evidence.to_dict()
+                if isinstance(final_result.evidence, list):
+                    evidence_dict = [e.to_dict() if hasattr(e, "to_dict") else e for e in final_result.evidence]
+                else:
+                    evidence_dict = final_result.evidence.to_dict() if hasattr(final_result.evidence, "to_dict") else final_result.evidence
             except Exception as ev_err:
                 logger.warning(f"Evidence serialization failed: {ev_err}")
 
@@ -227,6 +239,21 @@ def ask():
         response['analysis_id'] = analysis_id
         response['response_actions'] = response_actions
         response['result'] = result_block
+
+        # Attach transformation plan (from TransformEngine) — null for non-transform responses
+        transform_plan = None
+        transformation_clarification = None
+        transformation_update = None
+        trigger_investigation = False
+        if final_result.metadata:
+            transform_plan = final_result.metadata.get('transform_plan')
+            transformation_clarification = final_result.metadata.get('clarification')
+            transformation_update = final_result.metadata.get('transformation_update')
+            trigger_investigation = bool(final_result.metadata.get('trigger_investigation', False))
+        response['transform_plan'] = transform_plan
+        response['transformation_clarification'] = transformation_clarification
+        response['transformation_update'] = transformation_update
+        response['trigger_investigation'] = trigger_investigation
 
         # Expose chat_id to frontend — may have been auto-created by the
         # analytics pipeline to satisfy FK constraints on analysis_sessions

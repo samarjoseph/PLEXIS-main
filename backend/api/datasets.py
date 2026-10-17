@@ -18,6 +18,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Tuple, Any
+import pandas as pd
 
 from flask import Blueprint, Response, request, jsonify, stream_with_context
 
@@ -178,6 +179,92 @@ def _sse_module_ready(module_id: str, display_name: str, richness: float, previe
 
 
 # ---------------------------------------------------------------------------
+# Deterministic Upload Summary Builder
+# ---------------------------------------------------------------------------
+
+def _build_deterministic_upload_summary(dko, filename: str, df) -> str:
+    """
+    Build a structured factual upload summary from the DKO and DataFrame.
+
+    ARCHITECTURE: This replaces the LLM essay. The Investigation workspace
+    provides detailed analysis. This message is a rich-but-compact confirmation.
+
+    Uses pandas facts only — NO LLM interpretation.
+    """
+    import pandas as pd
+
+    rows = len(df)
+    cols = len(df.columns)
+
+    # Count missing values from the actual DataFrame (deterministic)
+    total_missing = int(df.isnull().sum().sum())
+    missing_by_col = df.isnull().sum()
+    cols_with_missing = {col: int(count) for col, count in missing_by_col.items() if count > 0}
+
+    # Count duplicates
+    try:
+        dup_count = int(df.duplicated().sum())
+    except Exception:
+        dup_count = 0
+
+    # Completeness
+    complete_rows = rows - int(df.isnull().any(axis=1).sum())
+    complete_pct = round((complete_rows / rows) * 100) if rows > 0 else 100
+
+    # Column type breakdown
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    cat_cols = [c for c in df.columns if c not in numeric_cols]
+
+    # Build structured message
+    parts = [f"**{filename}**", f"", f"{rows:,} rows x {cols} columns"]
+
+    # Data Quality section
+    quality_lines = []
+    if total_missing > 0:
+        col_details = ", ".join(
+            f"`{col}` ({count})" for col, count in list(cols_with_missing.items())[:5]
+        )
+        if len(cols_with_missing) > 5:
+            col_details += f" (+{len(cols_with_missing) - 5} more)"
+        quality_lines.append(
+            f"- {total_missing} missing {'cell' if total_missing == 1 else 'cells'} "
+            f"across {len(cols_with_missing)} column{'s' if len(cols_with_missing) != 1 else ''}: "
+            f"{col_details}"
+        )
+    if dup_count > 0:
+        quality_lines.append(f"- {dup_count} duplicate row{'s' if dup_count != 1 else ''}")
+    quality_lines.append(f"- {complete_pct}% complete rows ({complete_rows:,}/{rows:,})")
+
+    if quality_lines:
+        parts.append("")
+        parts.append("**Data Quality**")
+        parts.extend(quality_lines)
+
+    # Column table (compact)
+    parts.append("")
+    parts.append("| Column | Type | Missing | Unique |")
+    parts.append("|--------|------|--------:|-------:|")
+    for col_name in df.columns:
+        col_type = "numeric" if col_name in numeric_cols else "text"
+        n_missing = int(missing_by_col[col_name])
+        try:
+            n_unique = int(df[col_name].nunique())
+        except Exception:
+            n_unique = 0
+        parts.append(f"| {col_name} | {col_type} | {n_missing} | {n_unique} |")
+
+    parts.append("")
+    parts.append("Investigation ready.")
+
+    logger.info(
+        "[UPLOAD] dataset=%s rows=%d columns=%d missing=%d duplicates=%d complete_pct=%d",
+        filename, rows, cols, total_missing, dup_count, complete_pct,
+    )
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Upload Endpoint — full RFC-002 pipeline
 # ---------------------------------------------------------------------------
 
@@ -223,34 +310,7 @@ def upload_dataset() -> Tuple[Any, int]:
         event_bus.publish(DatasetUploadedEvent(filename=filename))
         fp = file_fingerprint(saved_path)
 
-        # Check cache: same file, already processed
-        existing = dataset_registry.get_by_filename(filename)
-        if existing and existing.file_fingerprint == fp and existing.dko is not None:
-            logger.info(f"Cache hit for '{filename}' (fingerprint match)")
-
-            dataset_id = existing.dataset_id
-            frontend_payload = dataset_intelligence_engine.get_frontend_payload(existing.dko)
-
-            # Re-decompose into module registry if needed
-            if not module_registry.has_bundle(dataset_id):
-                _decompose_and_store(existing.dko, dataset_id)
-
-            available_modules = _safe_list_modules(dataset_id)
-
-            @stream_with_context
-            def stream_cached():
-                yield _sse_analyzing("cache_hit")
-                presentation_text = existing.dko.presentation.presentation if existing.dko.presentation else None
-                if presentation_text:
-                    yield _sse_chunk(presentation_text)
-                else:
-                    yield _sse_chunk(f'Dataset **"{filename}"** is already loaded and unchanged.')
-                yield _sse_done({
-                    "dataset_id": dataset_id,
-                    "dataset_info": frontend_payload,
-                })
-
-            return _sse_response(stream_cached)
+        # Removed file-hash cache check. Same file must get a NEW dataset_id and fresh state.
 
         # Load DataFrame
         df = dataset_loader.load(saved_path)
@@ -325,25 +385,14 @@ def upload_dataset() -> Tuple[Any, int]:
                 # Store in registry (dataset_id keyed, TTL=24h, LRU max 200)
                 module_registry.store(summary)
 
-                # Primary LLM Narrative — stream chunks
-                # SOURCE_LLM / SOURCE_FALLBACK sentinels are stripped here — users never see them.
-                # The engine logs [PRESENTATION_SOURCE] directly after confirming first chunk.
-                presentation_source = "unknown"
-                for chunk in presentation_engine.stream(summary):
-                    if not chunk:
-                        continue
-                    if chunk == SOURCE_LLM:
-                        presentation_source = "llm"
-                        continue
-                    if chunk == SOURCE_FALLBACK:
-                        presentation_source = "deterministic_fallback"
-                        continue
-                    accumulated_chunks.append(chunk)
-                    yield _sse_chunk(chunk)
-
-                # Persist presentation text in DKO
-                if accumulated_chunks:
-                    _persist_presentation(dko, accumulated_chunks, dataset_id)
+                # ── Deterministic Upload Summary (replaces LLM essay) ─────────
+                # ARCHITECTURE: Upload produces a SHORT factual summary.
+                # The Investigation workspace provides the full analysis.
+                # The LLM must NOT generate the upload message.
+                presentation_source = "deterministic"
+                summary_text = _build_deterministic_upload_summary(dko, filename, df)
+                accumulated_chunks.append(summary_text)
+                yield _sse_chunk(summary_text)
 
                 # Build frontend payload and module list
                 frontend_payload = dataset_intelligence_engine.get_frontend_payload(dko)
@@ -359,6 +408,7 @@ def upload_dataset() -> Tuple[Any, int]:
                     "dataset_id": final_dataset_id,
                     "dataset_info": frontend_payload,
                     "presentation_source": presentation_source,
+                    "trigger_investigation": True,  # Signal frontend to open Investigation tab
                 })
                 
                 # After yielding done event, auto-start investigation
@@ -702,7 +752,33 @@ def start_investigation(dataset_id):
         return jsonify({"error": "Dataset not found"}), 404
         
     from autonomous_analysis.engine import autonomous_investigation_engine
-    if autonomous_investigation_engine.is_running(dataset_id):
+    payload = request.get_json(silent=True) or {}
+    if payload.get("refresh"):
+        # Investigation reports are keyed to dataset semantics. Transformations
+        # keep the dataset ID, so derive a new fingerprint from the live frame.
+        import hashlib
+        try:
+            frame_hash = pd.util.hash_pandas_object(entry.dataframe, index=True).values.tobytes()
+        except Exception:
+            frame_hash = entry.dataframe.to_csv(index=True).encode("utf-8")
+        fingerprint = hashlib.sha256(frame_hash).hexdigest()
+        # Recompute schema/statistical semantics from the post-transform frame.
+        # This request runs asynchronously from the user's apply/undo response.
+        refreshed_dko = dataset_intelligence_engine.analyze(
+            entry.dataframe,
+            dataset_name=entry.filename,
+            use_cache=False,
+            skip_presentation=True,
+        )
+        from dataclasses import replace
+        entry.dko = replace(
+            refreshed_dko,
+            fingerprint=fingerprint,
+            row_count=len(entry.dataframe),
+            column_count=len(entry.dataframe.columns),
+        )
+        autonomous_investigation_engine.invalidate_dataset(dataset_id)
+    elif autonomous_investigation_engine.is_running(dataset_id):
         return jsonify({"error": "Investigation already in progress"}), 409
         
     autonomous_investigation_engine.start_background(dataset_id, entry.dko, entry.dataframe)
@@ -728,6 +804,18 @@ def get_investigation(dataset_id):
     report = autonomous_investigation_engine.get_report(dataset_id)
     if report:
         return jsonify(report)
+    
+    from datasets.registry import dataset_registry
+    from autonomous_analysis.deterministic_overview import generate_deterministic_overview
+    
+    entry = dataset_registry.get_by_id(dataset_id)
+    if entry is not None and entry.dataframe is not None:
+        fallback_report = generate_deterministic_overview(entry.dataframe, entry.filename, dataset_id)
+        if autonomous_investigation_engine.is_running(dataset_id):
+            fallback_report["status"] = "in_progress"
+            return jsonify(fallback_report), 202
+        else:
+            return jsonify(fallback_report), 200
     
     if autonomous_investigation_engine.is_running(dataset_id):
         return jsonify({"status": "in_progress"}), 202

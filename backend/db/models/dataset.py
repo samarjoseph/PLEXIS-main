@@ -23,9 +23,8 @@ class Dataset(Base):
     The same user uploading the same file twice reuses this record.
     """
     __tablename__ = "datasets"
-    __table_args__ = (
-        UniqueConstraint("user_id", "file_hash", name="uq_user_file_hash"),
-    )
+    # Removed UniqueConstraint("user_id", "file_hash", name="uq_user_file_hash")
+    # because explicit uploads must create NEW dataset instances even if file is identical.
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(

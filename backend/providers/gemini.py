@@ -8,7 +8,7 @@ SDK imports are LAZY (inside methods) to ensure provider isolation:
 import time
 import json
 import logging
-from typing import Optional, Any, Generator
+from typing import Optional, Any, Generator, Dict
 
 from providers.base import ProviderResponse
 from providers.domain.contracts import IProviderAdapter, AIRequest, ProviderCapabilities
@@ -25,7 +25,7 @@ def _get_genai_client(api_key: str):
     """
     try:
         from google import genai as _genai
-        from google.genai import types as _types  # noqa: F401 — side-effect import validates package
+        from google.genai import types as _types  # noqa: F401
     except ImportError as e:
         raise ImportError(
             f"google-genai SDK not available: {e}. "
@@ -40,19 +40,20 @@ def _get_genai_client(api_key: str):
 
 
 class GeminiProvider(IProviderAdapter):
-    """Gemini provider using google-genai SDK, with lazy SDK loading."""
+    """Gemini provider using google-genai SDK, with lazy SDK loading and multi-key support."""
 
     def __init__(self, api_key: str):
         """Store API key only — SDK imported lazily on first call."""
         self._api_key = api_key
-        self._client = None   # initialized on first use
+        self._clients: Dict[str, Any] = {}
 
-    def _get_client(self):
-        """Return (or create) the genai Client."""
-        if self._client is None:
-            client, _ = _get_genai_client(self._api_key)
-            self._client = client
-        return self._client
+    def _get_client(self, api_key: Optional[str] = None):
+        """Return (or create) the genai Client for the given API key."""
+        key = api_key or self._api_key
+        if key not in self._clients:
+            client, _ = _get_genai_client(key)
+            self._clients[key] = client
+        return self._clients[key]
 
     @property
     def provider_name(self) -> str:
@@ -60,7 +61,7 @@ class GeminiProvider(IProviderAdapter):
 
     def get_capabilities(self, model_name: str) -> ProviderCapabilities:
         """Return capabilities for the given Gemini model."""
-        if "pro" in model_name.lower():
+        if "pro" in model_name.lower() or "flash" in model_name.lower():
             return ProviderCapabilities(
                 vision=True,
                 embeddings=False,
@@ -113,6 +114,8 @@ class GeminiProvider(IProviderAdapter):
 
     def _get_model_for_request(self, request: AIRequest) -> str:
         """Select model from model_registry for the given task."""
+        if hasattr(request, "model_id") and request.model_id:
+            return request.model_id
         try:
             from providers.model_registry import model_registry
             task = (request.task or '').lower()
@@ -129,22 +132,16 @@ class GeminiProvider(IProviderAdapter):
                 return gemini_models[0].model_name
         except Exception as exc:
             logger.warning('[GeminiProvider] model_registry lookup failed: %s', exc)
-        # Hard fallback — Gemini is not in the normal routing chain.
-        # This path is only reached if gemini provider is called explicitly.
         return 'gemini-2.0-flash'
 
-    def generate(self, request: AIRequest) -> ProviderResponse:
+    def generate(self, request: AIRequest, api_key: Optional[str] = None) -> ProviderResponse:
         """Generate text using Gemini, governed by AIRequest."""
         try:
             from google.genai import types as _types
 
-            client = self._get_client()
+            client = self._get_client(api_key)
             prompt = self._convert_messages(request.messages) if request.messages else request.task
             model_name = self._get_model_for_request(request)
-            logger.info(
-                '[PRESENTATION_MODEL_REQUEST] provider=gemini selected_model=%s outgoing_model=%s',
-                model_name, model_name,
-            )
 
             response_mime_type = 'application/json' if request.json_mode else 'text/plain'
 
@@ -170,13 +167,14 @@ class GeminiProvider(IProviderAdapter):
                 output_tokens = response.usage_metadata.candidates_token_count or 0
 
             return ProviderResponse(
-                text=response.text,
+                text=response.text or "",
                 model=model_name,
                 provider=self.provider_name,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 success=True,
+                status_code=200,
                 raw_response={"text": response.text}
             )
         except (ImportError, RuntimeError) as sdk_err:
@@ -188,23 +186,25 @@ class GeminiProvider(IProviderAdapter):
         except Exception as e:
             logger.error(f"Gemini generate error: {e}")
             mapped_error = self._map_exception(e)
+            sc = getattr(e, 'code', None) or getattr(e, 'status_code', None)
+            if sc is None and ('429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e)):
+                sc = 429
+            elif sc is None and ('401' in str(e) or '403' in str(e) or 'UNAUTHENTICATED' in str(e)):
+                sc = 401
             return ProviderResponse(
                 text='', model="unknown", provider=self.provider_name,
-                success=False, error=str(mapped_error)
+                success=False, error=str(mapped_error),
+                status_code=sc
             )
 
-    def generate_stream(self, request: AIRequest) -> Generator[str, None, None]:
+    def generate_stream(self, request: AIRequest, api_key: Optional[str] = None) -> Generator[str, None, None]:
         """Stream text chunks using Gemini's native streaming API."""
         try:
             from google.genai import types as _types
 
-            client = self._get_client()
+            client = self._get_client(api_key)
             prompt = self._convert_messages(request.messages) if request.messages else request.task
             model_name = self._get_model_for_request(request)
-            logger.info(
-                '[PRESENTATION_MODEL_REQUEST] provider=gemini selected_model=%s outgoing_model=%s',
-                model_name, model_name,
-            )
 
             config = _types.GenerateContentConfig(
                 system_instruction=request.system_prompt,
@@ -227,3 +227,7 @@ class GeminiProvider(IProviderAdapter):
         except Exception as e:
             logger.error(f"Gemini generate_stream error: {e}")
             raise self._map_exception(e)
+
+    def health_check(self) -> bool:
+        """Health check verifying credential presence."""
+        return bool(self._api_key)

@@ -158,14 +158,22 @@ class AutonomousInvestigationEngine:
     def get_report(self, dataset_id: str) -> Optional[dict]:
         """Get the completed investigation report, or None if not done."""
         state = self._active.get(dataset_id)
-        if state and state.get("report"):
+        current_fingerprint = self._get_fingerprint(dataset_id)
+        if (state and state.get("report") and current_fingerprint
+                and state["report"].get("dataset_fingerprint") == current_fingerprint):
             return state["report"]
 
         # Fall back to cache
-        fp = self._get_fingerprint(dataset_id)
-        if fp:
-            return investigation_cache.get_report(fp)
+        if current_fingerprint:
+            return investigation_cache.get_report(current_fingerprint)
         return None
+
+    def invalidate_dataset(self, dataset_id: str) -> None:
+        """Detach the current run/report so a changed dataframe cannot reuse it."""
+        state = self._active.pop(dataset_id, None)
+        if state:
+            for waiter in state.get("waiters", []):
+                waiter.set()
 
     def is_running(self, dataset_id: str) -> bool:
         state = self._active.get(dataset_id)
@@ -397,12 +405,11 @@ class AutonomousInvestigationEngine:
 
     def _get_fingerprint(self, dataset_id: str) -> Optional[str]:
         """Try to get fingerprint from active state or registry."""
-        state = self._active.get(dataset_id)
-        if state and state.get("report"):
-            return state["report"].get("dataset_fingerprint")
         try:
             from datasets.registry import dataset_registry
             entry = dataset_registry.get_by_id(dataset_id)
+            if entry and getattr(entry, "dko", None):
+                return entry.dko.fingerprint
             if entry and hasattr(entry, "fingerprint"):
                 return entry.fingerprint
         except Exception:

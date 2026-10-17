@@ -6,8 +6,10 @@ from typing import Optional, Dict, Any, Generator
 
 from providers.base import ProviderResponse
 from providers.domain.contracts import IProviderAdapter, AIRequest, ProviderCapabilities
+from providers.model_registry import model_registry
 
 logger = logging.getLogger(__name__)
+
 
 class OpenRouterProvider(IProviderAdapter):
     """OpenRouter provider using requests API, behind ACL."""
@@ -16,6 +18,8 @@ class OpenRouterProvider(IProviderAdapter):
         """Initialize OpenRouter provider."""
         self._api_key = api_key
         self.endpoint = 'https://openrouter.ai/api/v1/chat/completions'
+        from config import Config
+        self.fallback_models = [m.strip() for m in Config.OPENROUTER_FALLBACK_MODELS.split(",") if m.strip()]
 
     @property
     def provider_name(self) -> str:
@@ -32,15 +36,40 @@ class OpenRouterProvider(IProviderAdapter):
             multimodal=True,
             streaming=True,
             json_mode=True,
-            reasoning_level="advanced" if "claude-3-opus" in model_name or "gpt-4" in model_name else "basic",
+            reasoning_level="advanced" if "nemotron" in model_name.lower() or "120b" in model_name.lower() else "basic",
             max_input_tokens=128000,
             max_output_tokens=4096,
             latency_profile="medium",
             cost_profile="medium"
         )
 
-    def generate(self, request: AIRequest) -> ProviderResponse:
+    def _get_model_for_request(self, request: AIRequest) -> str:
+        """Select the appropriate OpenRouter model dynamically."""
+        if hasattr(request, "model_id") and request.model_id:
+            return request.model_id
+
+        try:
+            task = (request.task or '').lower()
+            openrouter_models = model_registry.get_models_for_provider('openrouter')
+            if openrouter_models:
+                task_models = [
+                    m for m in openrouter_models
+                    if m.task_affinities.get(task, 0) > 0 and m.health_score > 0.3
+                ]
+                if task_models:
+                    task_models.sort(key=lambda m: (m.priority, -m.task_affinities.get(task, 0)))
+                    return task_models[0].model_name
+                openrouter_models_sorted = sorted(openrouter_models, key=lambda m: m.priority)
+                return openrouter_models_sorted[0].model_name
+        except Exception as exc:
+            logger.warning('[OpenRouterProvider] model_registry lookup failed: %s', exc)
+
+        from config import Config
+        return Config.ANALYSIS_OPENROUTER_MODEL or "google/gemma-2-27b-it:free"
+
+    def generate(self, request: AIRequest, api_key: Optional[str] = None) -> ProviderResponse:
         """Generate text using OpenRouter, governed by AIRequest."""
+        effective_key = api_key or self._api_key
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
@@ -49,13 +78,13 @@ class OpenRouterProvider(IProviderAdapter):
                 messages.append({'role': 'user', 'content': request.task})
 
             headers = {
-                'Authorization': f'Bearer {self._api_key}',
+                'Authorization': f'Bearer {effective_key}',
                 'Content-Type': 'application/json',
                 'HTTP-Referer': 'https://plexis.ai',
                 'X-Title': 'Plexis'
             }
 
-            model_name = "anthropic/claude-3-5-sonnet" if request.quality_target == "HIGH_QUALITY" else "openai/gpt-4o-mini"
+            model_name = self._get_model_for_request(request)
 
             body = {
                 'model': model_name,
@@ -69,6 +98,23 @@ class OpenRouterProvider(IProviderAdapter):
 
             start_time = time.time()
             response = requests.post(self.endpoint, headers=headers, json=body, timeout=60)
+            
+            # Detect 429
+            if response.status_code == 429:
+                from providers.quarantine import parse_retry_after
+                retry_after = parse_retry_after(response.headers.get("retry-after") or response.headers.get("Retry-After"))
+                return ProviderResponse(
+                    text='',
+                    model=model_name,
+                    provider=self.provider_name,
+                    success=False,
+                    error="HTTP 429: Too Many Requests on OpenRouter",
+                    status_code=429,
+                    retry_after=retry_after,
+                    headers=dict(response.headers),
+                    raw_response=response.text[:500] if hasattr(response, 'text') else None
+                )
+                
             response.raise_for_status()
             latency_ms = (time.time() - start_time) * 1000
             
@@ -77,29 +123,40 @@ class OpenRouterProvider(IProviderAdapter):
             usage = data.get('usage', {})
             input_tokens = usage.get('prompt_tokens', 0)
             output_tokens = usage.get('completion_tokens', 0)
+            actual_model = data.get('model', model_name)
 
             return ProviderResponse(
                 text=text,
-                model=model_name,
+                model=actual_model,
                 provider=self.provider_name,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 success=True,
+                status_code=200,
+                headers=dict(response.headers),
                 raw_response=data
             )
         except Exception as e:
             logger.error(f"OpenRouter generate error: {e}")
+            status_code = getattr(getattr(e, 'response', None), 'status_code', None)
+            resp_headers = dict(getattr(getattr(e, 'response', None), 'headers', {})) if getattr(e, 'response', None) else None
+            from providers.quarantine import parse_retry_after
+            retry_after = parse_retry_after(resp_headers.get("retry-after") or resp_headers.get("Retry-After")) if resp_headers else None
             return ProviderResponse(
                 text='',
-                model="unknown",
+                model=model_name if 'model_name' in locals() else 'unknown',
                 provider=self.provider_name,
                 success=False,
-                error=str(e)
+                error=str(e),
+                status_code=status_code,
+                headers=resp_headers,
+                retry_after=retry_after
             )
 
-    def generate_stream(self, request: AIRequest) -> Generator[str, None, None]:
+    def generate_stream(self, request: AIRequest, api_key: Optional[str] = None) -> Generator[str, None, None]:
         """Stream text chunks using OpenRouter API."""
+        effective_key = api_key or self._api_key
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
@@ -108,13 +165,13 @@ class OpenRouterProvider(IProviderAdapter):
                 messages.append({'role': 'user', 'content': request.task})
 
             headers = {
-                'Authorization': f'Bearer {self._api_key}',
+                'Authorization': f'Bearer {effective_key}',
                 'Content-Type': 'application/json',
                 'HTTP-Referer': 'https://plexis.ai',
                 'X-Title': 'Plexis'
             }
 
-            model_name = "anthropic/claude-3-5-sonnet" if request.quality_target == "HIGH_QUALITY" else "openai/gpt-4o-mini"
+            model_name = self._get_model_for_request(request)
 
             body = {
                 'model': model_name,
@@ -147,3 +204,6 @@ class OpenRouterProvider(IProviderAdapter):
             logger.error(f"OpenRouter generate_stream error: {e}")
             raise e
 
+    def health_check(self) -> bool:
+        """Health check verifying credential presence."""
+        return bool(self._api_key)

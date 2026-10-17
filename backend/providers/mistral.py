@@ -2,13 +2,15 @@ import time
 import requests
 import logging
 import json
-from typing import Optional, Any, Generator
+from typing import Optional, Any, Generator, Dict
 
+from config import Config
 from providers.base import ProviderResponse
 from providers.domain.contracts import IProviderAdapter, AIRequest, ProviderCapabilities
-from providers.errors import ProviderExecutionError
+from providers.errors import ProviderExecutionError, ProviderAuthenticationError, ProviderRateLimitError
 
 logger = logging.getLogger(__name__)
+
 
 class MistralProvider(IProviderAdapter):
     def __init__(self, api_key: str) -> None:
@@ -38,14 +40,18 @@ class MistralProvider(IProviderAdapter):
             cost_profile="medium"
         )
 
-    def _map_exception(self, e: Exception) -> Exception:
-        """Map generic exceptions to ProviderExecutionError."""
-        return ProviderExecutionError(str(e))
+    def _resolve_model(self, request: AIRequest) -> str:
+        """Resolve model from request or configuration."""
+        if hasattr(request, "model_id") and request.model_id:
+            return request.model_id
+        # Use configured Router Mistral model (Mistral Small 4)
+        return Config.ROUTER_MISTRAL_MODEL or "mistral-small-latest"
 
-    def generate(self, request: AIRequest) -> ProviderResponse:
+    def generate(self, request: AIRequest, api_key: Optional[str] = None) -> ProviderResponse:
         start_time = time.time()
+        effective_key = api_key or self.api_key
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {effective_key}",
             "Content-Type": "application/json"
         }
         
@@ -55,7 +61,7 @@ class MistralProvider(IProviderAdapter):
                 messages.append({"role": "system", "content": request.system_prompt})
             messages.append({"role": "user", "content": request.task})
         
-        model_name = "mistral-large-latest" if request.quality_target == "HIGH_QUALITY" else "open-mistral-nemo"
+        model_name = self._resolve_model(request)
         
         payload = {
             "model": model_name,
@@ -67,8 +73,20 @@ class MistralProvider(IProviderAdapter):
         if request.json_mode:
             payload["response_format"] = {"type": "json_object"}
         
+        status_code = None
+        resp_headers: Dict[str, Any] = {}
+        retry_after = None
+
         try:
             response = requests.post(self.base_url, headers=headers, json=payload, timeout=60)
+            status_code = response.status_code
+            resp_headers = dict(response.headers)
+            if "retry-after" in resp_headers:
+                try:
+                    retry_after = float(resp_headers["retry-after"])
+                except (ValueError, TypeError):
+                    pass
+
             response.raise_for_status()
             data = response.json()
             
@@ -86,28 +104,62 @@ class MistralProvider(IProviderAdapter):
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 success=True,
+                status_code=status_code,
+                headers=resp_headers,
+                retry_after=retry_after,
                 raw_response=data
             )
-        except Exception as e:
-            logger.error(f"Mistral generate error: {e}")
-            mapped_error = self._map_exception(e)
+        except requests.exceptions.HTTPError as he:
+            err_resp = he.response
+            sc = err_resp.status_code if err_resp is not None else 500
+            h = dict(err_resp.headers) if err_resp is not None else {}
+            ra = None
+            if "retry-after" in h:
+                try:
+                    ra = float(h["retry-after"])
+                except (ValueError, TypeError):
+                    pass
+            err_text = ""
+            try:
+                err_text = err_resp.text if err_resp is not None else str(he)
+            except Exception:
+                err_text = str(he)
+
+            logger.error(f"Mistral HTTP {sc} error: {err_text}")
             return ProviderResponse(
                 text="",
                 model=model_name,
                 provider=self._name,
                 success=False,
-                error=str(mapped_error)
+                error=f"HTTP {sc}: {err_text}",
+                status_code=sc,
+                headers=h,
+                retry_after=ra,
+                raw_response={"error": err_text, "status_code": sc}
+            )
+        except Exception as e:
+            logger.error(f"Mistral generate error: {e}")
+            return ProviderResponse(
+                text="",
+                model=model_name,
+                provider=self._name,
+                success=False,
+                error=str(e),
+                status_code=status_code,
+                headers=resp_headers,
+                retry_after=retry_after
             )
             
-    def generate_stream(self, request: AIRequest) -> Generator[str, None, None]:
+    def generate_stream(self, request: AIRequest, api_key: Optional[str] = None) -> Generator[str, None, None]:
         """Stream text chunks using Mistral API."""
+        effective_key = api_key or self.api_key
         messages = request.messages.copy() if request.messages else []
         if not messages and request.task:
             if request.system_prompt:
                 messages.append({"role": "system", "content": request.system_prompt})
             messages.append({"role": "user", "content": request.task})
 
-        model_name = "mistral-large-latest" if request.quality_target == "HIGH_QUALITY" else "open-mistral-nemo"
+        model_name = self._resolve_model(request)
 
         payload = {
             "model": model_name,
@@ -120,7 +172,7 @@ class MistralProvider(IProviderAdapter):
         try:
             with requests.post(
                 self.base_url,
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {effective_key}", "Content-Type": "application/json"},
                 json=payload,
                 stream=True,
                 timeout=60,
@@ -145,4 +197,8 @@ class MistralProvider(IProviderAdapter):
                         continue
         except Exception as e:
             logger.error(f"Mistral generate_stream error: {e}")
-            raise self._map_exception(e)
+            raise ProviderExecutionError(str(e))
+
+    def health_check(self) -> bool:
+        """Health check verifying network and credential readiness."""
+        return bool(self.api_key)

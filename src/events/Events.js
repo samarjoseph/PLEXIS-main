@@ -171,4 +171,32 @@ export const Events = Object.freeze({
    * Payload: { analysisId, originalQuery }
    */
   ANALYSIS_RETRY_REQUESTED: 'analysis:retry_requested',
+
+  // ── Investigation ────────────────────────────────────────────────────────
+  /**
+   * Fired to open the Investigation tab in AnalyticsPanelV2.
+   * Payload: { datasetId }
+   */
+  INVESTIGATION_REQUESTED: 'investigation:requested',
+  /** A refreshed investigation run has started for the current dataset. */
+  INVESTIGATION_REFRESHED: 'investigation:refreshed',
+
+  // ── Transformation lifecycle ─────────────────────────────────────────────
+  /**
+   * Fired when the backend returns a transformation plan for user review.
+   * Payload: { plan, datasetId }
+   */
+  TRANSFORM_PLAN_RECEIVED: 'transform:plan_received',
+
+  /**
+   * Fired after a transformation is successfully applied to the dataset.
+   * Payload: { datasetId, result }
+   */
+  TRANSFORM_APPLIED: 'transform:applied',
+
+  /**
+   * Fired after a transformation is successfully undone.
+   * Payload: { datasetId, result }
+   */
+  TRANSFORM_UNDONE: 'transform:undone',
 });

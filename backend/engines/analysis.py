@@ -63,29 +63,61 @@ class AnalysisEngine(BaseEngine):
                 should_compose=False,
             )
 
-        # ── Step 2: Run the analytical pipeline ───────────────────────────────
-        try:
-            db = self._get_db()
-            from analytics.pipeline import analytics_pipeline
-            result: AnalyticalResult = analytics_pipeline.run(context, df, db=db)
-        except Exception as e:
-            logger.error("[AnalysisEngine] Pipeline error: %s", e, exc_info=True)
-            return EngineResult(
-                answer="An error occurred during analysis.",
-                source="analysis",
-                success=False,
-                should_compose=False,
-            )
+        #  Step 2: Run the analytical pipeline for each operation
+        ops = getattr(context, "llm_operations", [getattr(context, "llm_operation", None)])
+        if not ops:
+            ops = [None]
+            
+        results = []
+        for op in ops:
+            # Isolate operation
+            context.llm_operation = op
+            try:
+                db = self._get_db()
+                from analytics.pipeline import analytics_pipeline
+                res = analytics_pipeline.run(context, df, db=db)
+                results.append(res)
+            except Exception as e:
+                logger.error("[AnalysisEngine] Pipeline error: %s", e, exc_info=True)
+                return EngineResult(
+                    answer="An error occurred during analysis.",
+                    source="analysis",
+                    success=False,
+                    should_compose=False,
+                )
 
-        # ── Step 3: Handle pipeline failure ───────────────────────────────────
-        if result.value is None and not result.verified:
-            err = result.verification_details.get("error", "unknown")
-            logger.warning("[AnalysisEngine] Pipeline could not compute result: %s", err)
+        #  Step 3: Handle pipeline failure 
+        all_verified = all(r.verified for r in results)
+        if not all_verified:
+            failed_res = next((r for r in results if not r.verified), None)
+            v_details = failed_res.verification_details if failed_res else {}
+            err = v_details.get("error", "unknown")
+            code = v_details.get("code", "")
+            msg = v_details.get("message", "")
+            logger.warning("[AnalysisEngine] Pipeline could not compute result: %s (code=%s)", err, code)
 
-            # Try capability fallback for simple cases
-            engine_result = self._capability_fallback(context, df)
-            if engine_result:
-                return engine_result
+            # Handle nonexistent column references gracefully with authoritative schema refusal
+            if code == "COLUMN_NOT_FOUND" or "not found in dataset" in str(msg).lower():
+                import re
+                target_col = v_details.get("column") or getattr(failed_res, "column", None)
+                if not target_col:
+                    m = re.search(r"Column '([^']+)' not found", str(msg))
+                    if m:
+                        target_col = m.group(1)
+                col_name = target_col or "requested"
+                return EngineResult(
+                    answer=f"The dataset does not contain a **{col_name}** column. The available columns in this dataset are: {', '.join(df.columns)}.",
+                    source="analysis",
+                    provider="system",
+                    success=True,
+                    should_compose=False,
+                )
+
+            # Try capability fallback for simple cases (only if single operation)
+            if len(results) == 1:
+                engine_result = self._capability_fallback(context, df)
+                if engine_result:
+                    return engine_result
 
             # If planning failed completely, tell the user honestly
             if err == "planner_failed":
@@ -106,42 +138,54 @@ class AnalysisEngine(BaseEngine):
                 facts={"query": context.message},
             )
 
-        # ── Step 4: Build EngineResult from verified AnalyticalResult ────────
+
+        #  Step 4: Build EngineResult from verified AnalyticalResult 
         dataset_name = getattr(context, "dataset_filename", "the dataset") or "the dataset"
         from analytics.pipeline import analytics_pipeline
-        narrative = analytics_pipeline.build_narrative(result, dataset_name)
+        narratives = [analytics_pipeline.build_narrative(r, dataset_name) for r in results]
+        
+        total_missing = int(df.isna().sum().sum())
+        total_cells = len(df) * len(df.columns)
+        rows_with_missing = int(df.isna().any(axis=1).sum())
+        complete_rows = len(df) - rows_with_missing
+
+        facts = {
+            "computed_answer": "\n\n".join(narratives),
+            "dataset_dimensions": {
+                "row_count": len(df),
+                "column_count": len(df.columns),
+                "columns": list(df.columns),
+                "total_cells": total_cells,
+                "total_missing_cells": total_missing,
+                "complete_cells": total_cells - total_missing,
+                "rows_with_missing": rows_with_missing,
+                "complete_rows": complete_rows,
+                "duplicate_rows": int(df.duplicated().sum()),
+            },
+            "operations": [
+                {
+                    "value": r.value,
+                    "operation": r.operation,
+                    "column": r.column,
+                    "details": getattr(r, "details", {}),
+                    "summary": narratives[i] if i < len(narratives) else "",
+                    "matching_rows": r.matching_rows[:3],
+                    "row_indices": r.row_indices[:5]
+                }
+                for i, r in enumerate(results)
+            ]
+        }
+        evidence = [r.to_response_dict() for r in results]
 
         engine_result = EngineResult(
-            answer=narrative,
+            answer="\n\n".join(narratives),
             source="analysis",
             provider="system",
             success=True,
-            # should_compose=False — the narrative is grounded, LLM must NOT recompute
-            # should_compose=True — LLM composes a natural response using the facts
-            # We use should_compose=True but pass VERIFIED facts to prevent hallucination.
             should_compose=True,
-            facts={
-                "value": result.value,
-                "operation": result.operation,
-                "column": result.column,
-                "matching_rows": result.matching_rows[:3],
-                "row_indices": result.row_indices[:5],
-                "verified": result.verified,
-                "dataset_name": dataset_name,
-                "analysis_id": str(result.analysis_id),
-            },
-            metadata={
-                "analysis_id": str(result.analysis_id),
-                "verified": result.verified,
-                "operation": result.operation,
-                "column": result.column,
-            },
+            facts=facts,
+            evidence=evidence,
         )
-
-        # Attach analysis_id to context so it can be included in the response
-        context.analysis_id = str(result.analysis_id)
-        # Attach full result so chat.py can build the result block without a DB round-trip
-        context.analytical_result = result
 
         return engine_result
 

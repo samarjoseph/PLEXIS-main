@@ -46,6 +46,7 @@ class AnalyticalResult:
     value: Any = None            # scalar (int, float, str) or list
     row_indices: List[int] = field(default_factory=list)
     matching_rows: List[Dict[str, Any]] = field(default_factory=list)
+    details: Dict[str, Any] = field(default_factory=dict)
 
     # Verification
     verified: bool = False
@@ -70,6 +71,7 @@ class AnalyticalResult:
             "operation": self.operation,
             "column": self.column,
             "value": self.value,
+            "details": self.details,
             "row_indices": self.row_indices,
             "matching_rows": self.matching_rows[:5],
             "verified": self.verified,

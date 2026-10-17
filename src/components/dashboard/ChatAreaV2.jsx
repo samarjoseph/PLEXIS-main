@@ -7,7 +7,6 @@ import {
 import PlexisLogo from '../brand/PlexisLogo';
 import MessageBubbleV2 from './MessageBubbleV2';
 import AIThinkingIndicator from './AIThinkingIndicator';
-import InvestigationView from './InvestigationView';
 import { useAuth } from '../../context/AuthContext';
 import { LogoToggle } from './SidebarV2';
 import Tooltip from '../ui/Tooltip';
@@ -47,6 +46,13 @@ export default function ChatAreaV2({
   onToggleSidebar,
   analyticsCollapsed,
   onToggleAnalytics,
+  // Transform handlers
+  onApplyTransform,
+  onCancelTransform,
+  onClarificationAction,
+  onUndoTransform,
+  onExportDataset,
+  isApplyingTransform,
 }) {
   const { user } = useAuth();
   const isDesktop = useIsDesktop();
@@ -238,14 +244,18 @@ export default function ChatAreaV2({
             key={msg.id}
             className={`v2-msg-row v2-msg-row--${msg.sender}`}
           >
-            <MessageBubbleV2 message={msg} onRetry={onRetry} />
+            <MessageBubbleV2
+              message={msg}
+              onRetry={onRetry}
+              onApplyTransform={onApplyTransform}
+              onCancelTransform={onCancelTransform}
+              onClarificationAction={onClarificationAction}
+              onUndoTransform={onUndoTransform}
+              onExportDataset={onExportDataset}
+              isApplyingTransform={isApplyingTransform}
+            />
           </div>
         ))}
-
-        {/* ── Autonomous Investigation Results ── */}
-        {activeDatasetId && messages.length > 0 && (
-          <InvestigationView datasetId={activeDatasetId} />
-        )}
 
         <AnimatePresence>
           {isLoading && (

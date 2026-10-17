@@ -22,6 +22,7 @@ def build_context_block(
     route_payload: Optional[Dict[str, Any]] = None,
     workspace_summary: Optional[str] = None,
     evidence_description: Optional[str] = None,
+    schema_context: Optional[Dict] = None,
 ) -> str:
     """
     Assembles a clean, structured context string for the LLM.
@@ -39,6 +40,13 @@ def build_context_block(
     parts.append(f"CURRENT INTENT: {intent}")
 
     # --- Dataset context: only mention it if relevant ---
+    if schema_context:
+        parts.append(f"DATASET CONTEXT (Deterministic Schema): {json.dumps(schema_context)}")
+        parts.append(
+            "CRITICAL: If asked about the dataset structure (e.g. columns, fields), "
+            "use the exact schema provided above. Do NOT guess or hallucinate."
+        )
+        
     if dataset_filename:
         parts.append(f"DATASET LOADED: {dataset_filename}")
         parts.append(
@@ -68,16 +76,21 @@ def build_context_block(
             "The ANALYTICAL FACTS below were computed DETERMINISTICALLY by pandas on the real dataset.\n"
             "You MUST state EXACTLY the values shown in the ANALYTICAL FACTS block.\n"
             "Do NOT invent, estimate, round, or hallucinate any numeric value.\n"
-            "Do NOT use your training knowledge about typical or expected values.\n"
+            "Do NOT refuse to answer when a computed_answer, operation, or count is provided in the facts.\n"
+            "If a computed value or count is 0, answer that the count is 0. 0 is a definitive, valid computed result (e.g., 0 rows match the criteria), NOT a lack of information.\n"
             "If the fact says max_value=65, say 65. If it says 108, say 108. Read the fact — do not guess.\n"
-            "Your only job is to explain these computed facts in natural language."
+            "FOR HYPOTHETICAL / SIMULATION OPERATIONS:\n"
+            "  The `hypothetical_value` is the PRIMARY answer for what the value would be among the remaining rows under the simulated condition.\n"
+            "  The `original_value` is the pre-exclusion baseline across the original dataset for comparison only.\n"
+            "  You MUST state the `hypothetical_value` as the resulting value among the remaining rows. NEVER state the `original_value` as the hypothetical result among the remaining rows.\n"
+            "Your only job is to explain these computed facts directly and accurately in natural language."
         )
         parts.append("\nANALYTICAL FACTS (from computation on the real dataset):")
         try:
             facts_str = json.dumps(facts, indent=2, default=str)
             # Truncate very large fact payloads to prevent prompt bloat
-            if len(facts_str) > 3000:
-                facts_str = facts_str[:3000] + "\n... [truncated for brevity]"
+            if len(facts_str) > 10000:
+                facts_str = facts_str[:10000] + "\n... [truncated for brevity]"
             parts.append(facts_str)
         except Exception:
             parts.append(str(facts))

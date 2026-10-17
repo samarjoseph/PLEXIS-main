@@ -341,10 +341,11 @@ export const PlexisAPI = {
   // ── Autonomous Investigation API ──────────────────────────────────────────
 
   /** Start investigation */
-  startInvestigation: async (datasetId) => {
+  startInvestigation: async (datasetId, { refresh = false } = {}) => {
     const response = await fetch(`${BASE_URL}/api/datasets/${datasetId}/investigate`, {
       method: 'POST',
       headers: defaultHeaders(),
+      ...(refresh ? { body: JSON.stringify({ refresh: true }) } : {}),
     });
     if (!response.ok && response.status !== 409) {
       throw new Error(`startInvestigation failed: ${response.status}`);
@@ -366,5 +367,54 @@ export const PlexisAPI = {
   /** SSE stream for investigation (returns EventSource URL) */
   getInvestigationStreamUrl: (datasetId) => {
     return `${BASE_URL}/api/datasets/${datasetId}/investigation/stream`;
+  },
+
+  // ── Transformation API ──────────────────────────────────────────────────
+
+  /** Apply an approved TransformationPlan by plan_id. */
+  async applyTransformation(planId, datasetId) {
+    const res = await fetch(`${BASE_URL}/api/transform/apply`, {
+      method: 'POST',
+      headers: defaultHeaders(),
+      body: JSON.stringify({ plan_id: planId, dataset_id: datasetId }),
+    });
+    return res.json();
+  },
+
+  /** Undo the last transformation for a dataset. */
+  async undoTransformation(datasetId) {
+    const res = await fetch(`${BASE_URL}/api/transform/undo`, {
+      method: 'POST',
+      headers: defaultHeaders(),
+      body: JSON.stringify({ dataset_id: datasetId }),
+    });
+    return res.json();
+  },
+
+  /** Get transformation version history for a dataset. */
+  async getVersionHistory(datasetId) {
+    const res = await fetch(`${BASE_URL}/api/transform/versions/${datasetId}`, {
+      headers: defaultHeaders(),
+    });
+    return res.json();
+  },
+
+  /** Export the current (possibly transformed) dataset as a CSV download. */
+  async exportDataset(datasetId) {
+    const res = await fetch(`${BASE_URL}/api/transform/export/${datasetId}`, {
+      headers: { 'X-User-Email': getPlexisUserEmail() },
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    a.download = match ? match[1] : 'dataset_transformed.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 };

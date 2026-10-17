@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from planner.schema import AnalyticalPlan, NUMERIC_OPERATIONS, _FORBIDDEN_PATTERNS
+from planner.schema import AnalyticalPlan, NUMERIC_OPERATIONS, ORDERABLE_OPERATIONS, _FORBIDDEN_PATTERNS
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,11 @@ _NUMERIC_CANONICAL = frozenset({"integer", "float", "numeric"})
 # Raw pandas dtype substrings — used as a last-resort fallback if context
 # provides non-canonical types (e.g., "int64", "float32").
 _NUMERIC_DTYPE_HINTS = ("int", "float", "double", "decimal", "num")
+
+# Canonical types considered orderable (valid for min, max)
+_ORDERABLE_CANONICAL = frozenset({"integer", "float", "numeric", "datetime", "date", "string", "categorical"})
+_ORDERABLE_DTYPE_HINTS = ("int", "float", "double", "decimal", "num", "date", "time", "str", "object", "char")
+
 
 
 @dataclass
@@ -104,7 +109,20 @@ class PlanValidator:
 
         if plan.target_column:
             resolved = self._resolve_column(plan.target_column, col_lower)
-            if resolved is None:
+            if resolved is not None:
+                # Explicit physical column in dataset takes precedence
+                plan.target_column = resolved
+            elif plan.operation in ("count", "row_count") and plan.target_column.lower() in (
+                "count", "row_count", "rows", "records", "total_rows"
+            ):
+                plan.target_column = None
+            elif plan.operation in ("top_n", "bottom_n", "sort_rows") and plan.target_column.lower() in (
+                "count", "row_count", "rows", "frequency", "size", "rate", "percentage",
+                "proportion", "ratio", "difference", "absolute_difference", "abs_diff",
+                "absolute_difference_mean", "diff", "mean", "average", "median", "sum", "total", "std"
+            ):
+                pass  # Valid derived ranking metric
+            else:
                 return PlanValidationResult(
                     valid=False,
                     error_code="COLUMN_NOT_FOUND",
@@ -113,8 +131,6 @@ class PlanValidator:
                         f"Available: {columns[:15]}"
                     ),
                 )
-            # Normalize to exact column name in-place
-            plan.target_column = resolved
 
         for col in list(plan.columns):
             resolved = self._resolve_column(col, col_lower)
@@ -125,22 +141,49 @@ class PlanValidator:
                     error_message=f"Column '{col}' not found in dataset.",
                 )
 
-        # ── 5. Numeric type compatibility ─────────────────────────────────────
-        if plan.target_column and plan.operation in NUMERIC_OPERATIONS:
+        # ── 5. Numeric / Orderable type compatibility ────────────────────────
+        # For group_* operations, target_column is the GROUP KEY (categorical), not the
+        # value being aggregated. Skip the numeric check — executor validates internally.
+        _GROUP_OPS = frozenset({
+            "group_by", "group_mean", "group_sum", "group_count", "group_min", "group_max", "group_median",
+            "crosstab", "grouped_rate", "two_factor_aggregation", "grouped_binary_comparison", "grouped_multi_stat", "binned_target_rate",
+            "zero_vs_positive_comparison",
+            "binary_indicator_comparison",
+            "filtered_group_ranking",
+            "median_split_comparison",
+            "tail_risk_group_rate",
+            "date_month_audit"
+        })
+        if plan.target_column and plan.operation not in _GROUP_OPS:
             dtype = column_types.get(plan.target_column, "")
-            if dtype and not self._is_numeric(dtype):
-                logger.warning(
-                    "[PlanValidator] TYPE_INCOMPATIBLE: op=%s col=%s canonical_type=%s",
-                    plan.operation, plan.target_column, dtype,
-                )
-                return PlanValidationResult(
-                    valid=False,
-                    error_code="TYPE_INCOMPATIBLE",
-                    error_message=(
-                        f"Operation '{plan.operation}' requires a numeric column, "
-                        f"but '{plan.target_column}' has type '{dtype}'."
-                    ),
-                )
+            if plan.operation in NUMERIC_OPERATIONS:
+                if dtype and not self._is_numeric(dtype):
+                    logger.warning(
+                        "[PlanValidator] TYPE_INCOMPATIBLE: op=%s col=%s canonical_type=%s",
+                        plan.operation, plan.target_column, dtype,
+                    )
+                    return PlanValidationResult(
+                        valid=False,
+                        error_code="TYPE_INCOMPATIBLE",
+                        error_message=(
+                            f"Operation '{plan.operation}' requires a numeric column, "
+                            f"but '{plan.target_column}' has type '{dtype}'."
+                        ),
+                    )
+            elif plan.operation in ORDERABLE_OPERATIONS:
+                if dtype and not self._is_orderable(dtype):
+                    logger.warning(
+                        "[PlanValidator] TYPE_INCOMPATIBLE: op=%s col=%s canonical_type=%s",
+                        plan.operation, plan.target_column, dtype,
+                    )
+                    return PlanValidationResult(
+                        valid=False,
+                        error_code="TYPE_INCOMPATIBLE",
+                        error_message=(
+                            f"Operation '{plan.operation}' requires an orderable column, "
+                            f"but '{plan.target_column}' has type '{dtype}'."
+                        ),
+                    )
 
             # Log successful validation for observability
             logger.info(
@@ -150,16 +193,22 @@ class PlanValidator:
 
         return PlanValidationResult(valid=True)
 
+
     # ─────────────────────────── helpers ──────────────────────────────────────
 
     @staticmethod
     def _resolve_column(col: str, col_lower: dict) -> Optional[str]:
         """
-        Case-insensitive column lookup.
+        Case-insensitive column lookup with stripped-punctuation fallback.
         Returns the exact column name from the dataset, or None if not found.
-        Does NOT do partial matching — only exact case-insensitive.
         """
-        return col_lower.get(col.lower())
+        res = col_lower.get(col.lower())
+        if res:
+            return res
+        # Stripped punctuation fallback (e.g. orderyear -> Order_Year, departuredelay -> Departure_Delay)
+        col_clean = col.lower().replace("_", "").replace(" ", "")
+        col_stripped = {c.replace("_", "").replace(" ", ""): orig for c, orig in col_lower.items()}
+        return col_stripped.get(col_clean)
 
     @staticmethod
     def _is_numeric(dtype: str) -> bool:
@@ -184,5 +233,18 @@ class PlanValidator:
         # Raw pandas dtype fallback (e.g. if context bypassed canonical normalization)
         return any(hint in dt for hint in _NUMERIC_DTYPE_HINTS)
 
+    @staticmethod
+    def _is_orderable(dtype: str) -> bool:
+        """
+        Check if a type string represents an orderable column (numbers, dates, strings).
+        """
+        dt = dtype.lower().strip()
+        if dt in _ORDERABLE_CANONICAL:
+            return True
+        if dt == "unknown":
+            return True
+        return any(hint in dt for hint in _ORDERABLE_DTYPE_HINTS)
+
 
 plan_validator = PlanValidator()
+

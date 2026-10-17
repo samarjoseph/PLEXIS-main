@@ -91,6 +91,23 @@ class ResultVerifier:
         if op in scalar_ops and col and col in df.columns:
             return self._verify_scalar(executor_result, plan, df, col, scalar_ops[op])
 
+        completeness_ops = {
+            "total_cell_count": lambda d: len(d) * len(d.columns),
+            "complete_cell_count": lambda d: len(d) * len(d.columns) - int(d.isna().sum().sum()),
+            "rows_with_missing_count": lambda d: int(d.isna().any(axis=1).sum()),
+            "complete_rows_count": lambda d: int((~d.isna().any(axis=1)).sum()),
+            "duplicate_rows_after_deduplication": lambda d: int(len(d.drop_duplicates())),
+            "missing_count_total": lambda d: int(d.isna().sum().sum()),
+            "duplicate_count": lambda d: int(d.duplicated().sum()),
+        }
+        if op in completeness_ops:
+            expected = completeness_ops[op](df)
+            actual = executor_result.value
+            if expected == actual:
+                return VerifierResult(verified=True, expected=expected, actual=actual, details={"method": "independent_recompute", "operation": op})
+            else:
+                return VerifierResult(verified=False, expected=expected, actual=actual, error_code="VALUE_MISMATCH", error_message=f"Expected {expected}, got {actual}")
+
         # For non-scalar ops (top_n, filter, duplicates, etc.): trust executor
         # We cannot independently re-verify the full row set here without duplicating
         # the entire operation. Mark as verified=True with a note.
@@ -113,7 +130,15 @@ class ResultVerifier:
     ) -> VerifierResult:
         """Independently compute the scalar and compare to the executor result."""
         try:
-            series = pd.to_numeric(df[col], errors="coerce").dropna()
+            op = plan.operation
+            # Only coerce to numeric for math operations
+            math_ops = {"mean", "median", "sum", "std", "variance"}
+            
+            if op in math_ops:
+                series = pd.to_numeric(df[col], errors="coerce").dropna()
+            else:
+                series = df[col].dropna()
+                
             expected_raw = compute_fn(series)
             expected = self._safe(expected_raw)
             actual = executor_result.value

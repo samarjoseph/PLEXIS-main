@@ -62,11 +62,15 @@ class AutonomousExecutor:
         return results
 
     def _execute_one(self, candidate: AnalysisCandidate, df: pd.DataFrame, dko: DatasetKnowledgeObject, timeout_s: int) -> InvestigationResult:
+        import uuid
+        from autonomous_analysis.contracts import StructuredEvidence
+        
         start_time = time.time()
         result_data = {}
         status = "success"
         error = None
         evidence = None
+        structured_evidence = None
         
         try:
             op = candidate.analysis_type
@@ -106,6 +110,32 @@ class AutonomousExecutor:
                 raise ValueError(f"Unknown analysis_type {op}")
             
             evidence = self._build_evidence(candidate, result_data, dko)
+            
+            # Build StructuredEvidence
+            structured_evidence = StructuredEvidence(
+                evidence_id=f"ev_{uuid.uuid4().hex[:8]}",
+                dataset_id=dko.fingerprint, # Fallback dataset_id to fingerprint for now
+                dataset_fingerprint=dko.fingerprint,
+                evidence_type=op.value if hasattr(op, "value") else str(op),
+                columns=cols,
+                method=f"deterministic_{op}",
+            )
+            
+            # Recursive extraction
+            def extract(d, k_prefix=""):
+                if isinstance(d, dict):
+                    for k, v in d.items():
+                        extract(v, f"{k_prefix}_{k}" if k_prefix else str(k))
+                elif isinstance(d, list):
+                    for val in d:
+                        extract(val, k_prefix)
+                elif isinstance(d, (int, float)) and not isinstance(d, bool):
+                    if not pd.isna(d):
+                        structured_evidence.statistics[k_prefix] = float(d)
+                elif isinstance(d, str):
+                    structured_evidence.categories.append(d)
+                
+            extract(result_data)
                 
         except Exception as e:
             status = "failed"
@@ -122,6 +152,7 @@ class AutonomousExecutor:
             result_data=result_data,
             evidence=evidence,
             grounding=None,
+            structured_evidence=structured_evidence,
             error=error,
             execution_time_ms=execution_time_ms,
             interpretation="",

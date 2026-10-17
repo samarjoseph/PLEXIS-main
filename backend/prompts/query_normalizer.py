@@ -18,8 +18,8 @@ Output: hello
 Input: "highest profit??"
 Output: show highest profit
 
-Input: "whats avg salary"
-Output: what is the average salary
+Input: "whats avg price"
+Output: what is the average price
 
 Input to normalize:
 "{raw_query}"

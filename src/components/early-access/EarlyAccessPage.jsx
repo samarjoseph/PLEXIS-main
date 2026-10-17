@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './EarlyAccessPage.css';
 import { ArrowRight, Database, TrendingUp, Search, BarChart2, CheckCircle2, Shield, Eye, Settings, MessageSquare, Zap } from 'lucide-react';
@@ -20,9 +20,31 @@ export default function EarlyAccessPage() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [role, setRole] = useState('');
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [showNotification, setShowNotification] = useState(false);
+  const [viewState, setViewState] = useState('form');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('verify');
+    if (token) {
+      setViewState('verifying');
+      fetch('https://script.google.com/macros/s/AKfycbwbajZRmh9aPk3NDP6BQnR7TLsp0QPMShPSIkCxeLgjDQM4a5Yul2knMoNBrhhevr-M/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'verify', token })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'verified') {
+          setViewState('verified');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+          setViewState('invalid');
+        }
+      })
+      .catch(() => setViewState('invalid'));
+    }
+  }, []);
 
   const toggleOption = (opt) => {
     setFeedbackOptions((prev) =>
@@ -48,13 +70,13 @@ export default function EarlyAccessPage() {
     setIsSubmitting(true);
     
     try {
-      await fetch('https://script.google.com/macros/s/AKfycbwJUdAipw7EIWSLy83azIYSMAbx52yR_x24hzhGx8pW0TTg-3AcnvpO8imHO_hDQptv/exec', {
+      const response = await fetch('https://script.google.com/macros/s/AKfycbwbajZRmh9aPk3NDP6BQnR7TLsp0QPMShPSIkCxeLgjDQM4a5Yul2knMoNBrhhevr-M/exec', {
         method: 'POST',
-        mode: 'no-cors',
         headers: {
           'Content-Type': 'text/plain',
         },
         body: JSON.stringify({
+          action: 'signup',
           email,
           role,
           idea: feedbackText,
@@ -62,11 +84,19 @@ export default function EarlyAccessPage() {
         })
       });
       
-      // With no-cors, the response is opaque, so we just assume success if no network error occurred.
+      const data = await response.json();
       
-      setIsSubmitted(true);
-      setShowNotification(true);
-      setTimeout(() => setShowNotification(false), 5000);
+      if (data.error) {
+        console.error("Backend Error:", data.error);
+        setEmailError("Server Error: " + data.error);
+        return;
+      }
+
+      if (data.status === 'already_verified') {
+        setViewState('already-verified');
+      } else {
+        setViewState('check-email');
+      }
       
     } catch (err) {
       setEmailError('We couldn\'t submit your request. Please try again.');
@@ -103,27 +133,6 @@ export default function EarlyAccessPage() {
 
   return (
     <div className="ea-page">
-      <AnimatePresence>
-        {showNotification && (
-          <motion.div
-            className="ea-notification"
-            initial={{ opacity: 0, y: -50, x: '-50%' }}
-            animate={{ opacity: 1, y: 0, x: '-50%' }}
-            exit={{ opacity: 0, y: -50, x: '-50%' }}
-            role="status"
-            aria-live="polite"
-          >
-            <div className="ea-notification-content">
-              <CheckCircle2 className="ea-notification-icon" />
-              <div>
-                <strong>✓ You're on the Plexis early-access list!</strong>
-                <p>We'll let you know when early access is available.</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <nav className="ea-nav">
         <motion.div 
           className="ea-logo"
@@ -446,30 +455,69 @@ export default function EarlyAccessPage() {
 
           <div className="ea-onboarding-card">
             <AnimatePresence mode="wait">
-              {isSubmitted ? (
-                <motion.div 
-                  key="success"
-                  className="ea-offer-screen"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.5 }}
-                >
-                  <h2>You're in. 🚀</h2>
-                  <p className="ea-offer-success-msg">You're now on the Plexis early-access list.</p>
-                  
+              {viewState === 'check-email' && (
+                <motion.div key="check-email" className="ea-offer-screen" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                  <h2>Check your email 📩</h2>
+                  <p className="ea-offer-success-msg">We just sent a verification link to {email}.</p>
                   <div className="ea-offer-card">
-                    <h3>Your first month is on us.</h3>
+                    <h3>Almost there!</h3>
                     <p className="ea-offer-text">
-                      When your beta access is activated, early-access users will get the best available Plexis features free for their first month.
+                      Click the link in your email within 24 hours to secure your spot on the Plexis Early Access list.
+                      <br /><br />
+                      <span style={{ fontSize: '0.85em', color: '#a1a1aa' }}>
+                        (If you don't see it, please check your spam or promotions folder!)
+                      </span>
                     </p>
                   </div>
+                </motion.div>
+              )}
+
+              {viewState === 'already-verified' && (
+                <motion.div key="already-verified" className="ea-offer-screen" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                  <h2>You're already verified! 🎉</h2>
+                  <p className="ea-offer-success-msg">{email || 'Your email'} is already on the list.</p>
+                  <div className="ea-offer-card">
+                    <p className="ea-offer-text">Sit tight! We will email you as soon as your Plexis beta access is activated.</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {viewState === 'verifying' && (
+                <motion.div key="verifying" className="ea-offer-screen" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                  <h2>Verifying your email...</h2>
+                  <div className="ea-offer-card">
+                    <p className="ea-offer-text">Please wait a moment while we verify your token.</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {viewState === 'verified' && (
+                <motion.div key="verified" className="ea-offer-screen" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                  <h2>Email verified! 🎉</h2>
+                  <p className="ea-offer-success-msg">You're officially on the Plexis Early Access list.</p>
+                  <div className="ea-offer-card">
+                    <h3>Your first month is on us.</h3>
+                    <p className="ea-offer-text">When your beta access is activated, you'll get the best available Plexis features free for your first month. We will notify you via email.</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {viewState === 'invalid' && (
+                <motion.div key="invalid" className="ea-offer-screen" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                  <h2>Verification Failed ❌</h2>
+                  <p className="ea-offer-success-msg">This link is invalid or has expired.</p>
+                  <div className="ea-offer-card">
+                    <p className="ea-offer-text">Please sign up again to receive a new verification link.</p>
+                  </div>
                   <div className="ea-hero-actions" style={{ marginTop: '2rem' }}>
-                    <button className="ea-btn ea-btn-primary full-width" disabled>
-                      Stay tuned for beta access
+                    <button className="ea-btn ea-btn-secondary full-width" onClick={() => { setViewState('form'); window.history.replaceState({}, document.title, window.location.pathname); }}>
+                      Try Again
                     </button>
                   </div>
                 </motion.div>
-              ) : (
+              )}
+
+              {viewState === 'form' && (
                 <motion.div key="form-flow" initial={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <div className="ea-onboarding-step">
                     <div className="ea-step-header">

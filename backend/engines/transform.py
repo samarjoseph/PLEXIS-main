@@ -1,0 +1,489 @@
+"""
+TransformEngine — handles TRANSFORM intent.
+
+Flow:
+  1. Extract operation from context.llm_operation (set by MasterRouter)
+  2. Resolve DataFrame from dataset_registry
+  3. Call TransformationPlanner to compute the plan (no mutation)
+  4. Store plan in TransformationStore (L1) + PostgreSQL (L2 if available)
+  5. Return EngineResult with transform_plan attached
+
+The DataFrame is NEVER mutated here. Mutation happens only in /api/transform/apply
+after explicit user approval.
+"""
+from __future__ import annotations
+import logging
+import uuid
+from typing import Optional
+
+from engines.base import BaseEngine, EngineResult
+from core.context import ExecutionContext
+from transformation.planner import (
+    transformation_planner, TransformationClarificationRequired, 
+    ValueTypeMismatchConfirmationRequired, _compute_fingerprint,
+)
+from transformation.store import transformation_store
+
+logger = logging.getLogger(__name__)
+
+
+class TransformEngine(BaseEngine):
+
+    @property
+    def engine_name(self) -> str:
+        return 'transform'
+
+    def can_handle(self, context: ExecutionContext) -> bool:
+        return getattr(context, 'intent', None) in ('transform', 'TRANSFORM')
+
+    def handle(self, context: ExecutionContext) -> EngineResult:
+        dataset_id = str(getattr(context, 'dataset_id', '') or '')
+        if not dataset_id:
+            return EngineResult(
+                answer="No dataset is currently loaded. Please upload a dataset before requesting a transformation.",
+                source='transform',
+                provider='system',
+                success=False,
+                error='No dataset loaded',
+                should_compose=False,
+            )
+
+        # Resolve DataFrame from L1 registry
+        try:
+            from datasets.registry import dataset_registry
+            entry = dataset_registry.get(dataset_id)
+            if entry is None or entry.dataframe is None:
+                return EngineResult(
+                    answer="Dataset not found in memory. Please re-upload your dataset.",
+                    source='transform',
+                    provider='system',
+                    success=False,
+                    error='Dataset not in registry',
+                    should_compose=False,
+                )
+            df = entry.dataframe
+        except Exception as e:
+            logger.error('[TransformEngine] Registry lookup failed: %s', e)
+            return EngineResult(
+                answer='Failed to access dataset.',
+                source='transform', provider='system', success=False,
+                error=str(e), should_compose=False,
+            )
+
+        # Get LLM-structured operation
+        operation = getattr(context, 'llm_operation', None) or {}
+        if not operation or not operation.get('type'):
+            return EngineResult(
+                answer=(
+                    "I couldn't understand what transformation to apply. "
+                    "Please be more specific. For example: 'fill missing values with 0' "
+                    "or 'drop duplicate rows'."
+                ),
+                source='transform',
+                provider='system',
+                success=True,
+                metadata={'transform_plan': None},
+                should_compose=False,
+            )
+
+        # The LLM/legacy route may supply `new_value=None` for a quoted
+        # null-like word even though the raw request explicitly quoted it.
+        # Canonicalize literals once, at the request boundary, from the source
+        # message. The resulting TypedLiteral metadata then travels unchanged
+        # through pending state, scope selection, IR, preview, and execution.
+        if str(operation.get('type', '')).upper() == 'REPLACE_VALUES':
+            try:
+                from router.master_router import _parse_transform_from_message
+                parsed_request = _parse_transform_from_message(
+                    getattr(context, 'message', '') or ''
+                )
+                if parsed_request and parsed_request.get('type') == 'REPLACE_VALUES':
+                    for typed_key, raw_key in (
+                        ('_old_typed', 'old_value'),
+                        ('_new_typed', 'new_value'),
+                    ):
+                        literal = parsed_request.get(typed_key)
+                        if literal is not None:
+                            operation[typed_key] = literal
+                            operation[raw_key] = parsed_request.get(raw_key)
+            except Exception as exc:
+                # Parsing failure must not block otherwise supported plans.
+                logger.debug('[TransformEngine] Literal boundary canonicalization skipped: %s', exc)
+
+        if operation.get('_missing_slots'):
+            slots = list(operation['_missing_slots'])
+            question = self._question_for_slots(operation.get('type'), slots, operation)
+            return self._create_pending_clarification(
+                context, operation, df,
+                candidates=list(operation.get('columns') or df.columns),
+                missing_slots=slots, question=question,
+                clarification_type=slots[0].upper(),
+            )
+
+        # Generate plan (no mutation)
+        try:
+            op_type = operation.get('type')
+            
+            if op_type == 'IR_REQUIRED':
+                from transformation.ir_planner import ir_planner
+                from transformation.validator import ir_validator
+                from transformation.compiler import ir_compiler
+                
+                # We need column types for schema
+                dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()}
+                nullable = {col: df[col].isnull().any() for col in df.columns}
+                
+                # Call IR planner
+                user_msg = getattr(context, 'message', '')
+                ir = ir_planner.plan(user_msg, list(df.columns), dtypes, nullable)
+                
+                # Validate IR
+                validation = ir_validator.validate(ir, df)
+                if not validation.valid:
+                    if getattr(validation, 'unsupported', None):
+                        err_msg = f"This transformation requires a {validation.unsupported} primitive that is not currently available."
+                    else:
+                        err_msg = "Validation failed: " + "; ".join(validation.errors)
+                    return EngineResult(
+                        answer=f"Cannot create transformation plan: {err_msg}",
+                        source='transform', provider='system', success=False,
+                        error=err_msg, should_compose=False,
+                    )
+                
+                # Compile and Simulate IR
+                sim = ir_compiler.compile_and_simulate(ir, df, dataset_id)
+                if not sim.success:
+                    err_msg = "Simulation failed: " + "; ".join(sim.errors)
+                    return EngineResult(
+                        answer=f"Cannot create transformation plan: {err_msg}",
+                        source='transform', provider='system', success=False,
+                        error=err_msg, should_compose=False,
+                    )
+                
+                # Generate final TransformationPlan contract
+                fingerprint = _compute_fingerprint(df)
+                plan = ir_compiler.simulation_to_plan(ir, sim, dataset_id, fingerprint)
+                
+            else:
+                # Existing fast-path planner
+                plan = transformation_planner.plan(df, operation, dataset_id)
+                
+        except TransformationClarificationRequired as e:
+            return self._create_pending_clarification(
+                context, e.operation_payload or operation, df, candidates=e.candidate_columns,
+                missing_slots=e.missing_slots, question=str(e),
+                clarification_type=e.clarification_type,
+            )
+        except ValueTypeMismatchConfirmationRequired as e:
+            return self._create_pending_clarification(
+                context, e.operation_payload or operation, df, candidates=e.candidate_columns,
+                missing_slots=['value_type_confirmation'], question=str(e),
+                clarification_type=e.clarification_type,
+                extra_metadata={
+                    'requested_value_info': e.requested_value_info,
+                    'candidate_value_info': e.candidate_value_info,
+                    'candidate_count': e.candidate_count,
+                }
+            )
+        except Exception as e:
+            if type(e).__name__ == 'ValueAmbiguityClarificationRequired':
+                return self._create_pending_clarification(
+                    context, e.operation_payload or operation, df, candidates=[],
+                    missing_slots=['value_ambiguity_confirmation'], question=str(e),
+                    clarification_type='VALUE_AMBIGUITY',
+                    extra_metadata={
+                        'ambiguous_options': getattr(e, 'ambiguous_options', []),
+                    }
+                )
+            if not isinstance(e, ValueError):
+                raise
+        except ValueError as e:
+            return EngineResult(
+                answer=f"Cannot create transformation plan: {e}",
+                source='transform', provider='system', success=False, error=str(e),
+                should_compose=False,
+            )
+        except Exception as e:
+            logger.error('[TransformEngine] Planner error: %s', e, exc_info=True)
+            return EngineResult(
+                answer='Failed to plan transformation.',
+                source='transform', provider='system', success=False,
+                error=str(e), should_compose=False,
+            )
+
+        # Store in L1 cache
+        transformation_store.store(
+            plan,
+            session_id=getattr(context, 'chat_id', None) or getattr(context, 'session_id', None),
+        )
+        self._retain_active_transformation(context, operation, plan, df)
+
+        # Persist to PostgreSQL (best-effort)
+        self._persist_plan(context, plan, entry)
+
+        # Build user-facing answer
+        cells = plan.affected_cells_count
+        answer = (
+            f"{plan.operation_label}.\n\n"
+            f"{cells} {'cell' if cells == 1 else 'cells'} will change "
+            f"across {len(plan.affected_columns)} column(s). "
+            f"Review the plan below and click **Review Changes** to see the full before/after diff."
+        )
+        if plan.warnings:
+            answer += '\n\n⚠️ ' + ' '.join(plan.warnings)
+        if cells == 0:
+            answer = (
+                f"{plan.operation_label}. No changes needed — "
+                + (plan.warnings[0] if plan.warnings else 'data already satisfies this condition.')
+            )
+
+        result_metadata = {'transform_plan': self._plan_to_dict(plan)}
+        if operation.get('_supersedes_plan_id'):
+            conversation_id = str(
+                getattr(context, 'chat_id', None) or getattr(context, 'session_id', '') or ''
+            )
+            active_state = transformation_store.pending_for(conversation_id, dataset_id)
+            latest_correction = (active_state.correction_history[-1]
+                                 if active_state and active_state.correction_history else {})
+            result_metadata['transformation_update'] = {
+                'previous_plan_id': operation.get('_supersedes_plan_id'),
+                'previous_operation_label': operation.get('_previous_operation_label') or '',
+                'operation_label': plan.operation_label,
+                'plan_id': plan.plan_id,
+                'changed_slots': latest_correction.get('slots', []),
+            }
+
+        return EngineResult(
+            answer=answer,
+            source='transform',
+            provider='system',
+            success=True,
+            metadata=result_metadata,
+            should_compose=False,
+        )
+
+    def _retain_active_transformation(self, context, operation, plan, df):
+        """Retain resolved slots through review so corrections can replan safely."""
+        from transformation.store import PendingTransformationContext
+        conversation_id = str(
+            getattr(context, 'chat_id', None) or getattr(context, 'session_id', '') or ''
+        )
+        dataset_id = str(getattr(context, 'dataset_id', '') or '')
+        if not conversation_id or not dataset_id:
+            return
+        pending = transformation_store.pending_for(conversation_id, dataset_id)
+        current_payload = dict(plan.operation_payload)
+        if pending is None or pending.transformation_id != operation.get('_pending_transformation_id'):
+            from transformation.history import transformation_history
+            dataset_version = transformation_history.get_version(dataset_id)
+            try:
+                db_dataset_id = uuid.UUID(dataset_id)
+                from db.session import get_db
+                from db.repositories.transformation_repository import transformation_repository
+                db = get_db()
+                if db is not None:
+                    latest = transformation_repository.get_latest_version(db, db_dataset_id)
+                    if latest is not None:
+                        dataset_version = max(dataset_version, int(latest.version_number))
+            except (ValueError, TypeError):
+                pass
+            except Exception as exc:
+                logger.debug('[TransformEngine] Could not read active dataset version: %s', exc)
+            pending = PendingTransformationContext.create(
+                conversation_id=conversation_id,
+                dataset_id=dataset_id,
+                dataset_version=dataset_version,
+                dataset_fingerprint=_compute_fingerprint(df),
+                operation_type=plan.operation_type,
+                operation_payload=current_payload,
+                candidate_columns=list(plan.affected_columns),
+                selected_columns=list(current_payload.get('columns') or plan.affected_columns),
+                scope=current_payload.get('scope'),
+                missing_slots=[],
+                original_request=getattr(context, 'message', '') or '',
+                latest_question='',
+                source_typed_literal=current_payload.get('_old_typed'),
+                destination_typed_literal=(current_payload.get('_new_typed') or current_payload.get('_value_typed')),
+            )
+        pending.operation_type = plan.operation_type
+        pending.operation_payload = current_payload
+        if not pending.candidate_columns:
+            pending.candidate_columns = list(plan.affected_columns)
+        pending.selected_columns = list(current_payload.get('columns') or plan.affected_columns)
+        pending.scope = current_payload.get('scope')
+        pending.source_typed_literal = current_payload.get('_old_typed')
+        pending.destination_typed_literal = current_payload.get('_new_typed') or current_payload.get('_value_typed')
+        pending.current_plan_id = plan.plan_id
+        pending.dataset_fingerprint = plan.dataset_fingerprint
+        transformation_store.activate_plan(pending)
+
+    def _question_for_slots(self, operation_type, slots, operation):
+        if 'fill_value' in slots:
+            return 'What should I fill the missing values with? You can give a value or a strategy such as median.'
+        if 'target_scope' in slots and operation_type == 'RENAME_COLUMN':
+            return 'Which columns should I rename?'
+        if 'new_names' in slots:
+            return 'What new names should I use for those columns?'
+        return 'Which columns should I change?'
+
+    def _create_pending_clarification(
+        self, context, operation, df, *, candidates, missing_slots,
+        question, clarification_type, extra_metadata: dict = None
+    ):
+        from transformation.history import transformation_history
+        from transformation.store import PendingTransformationContext
+
+        conversation_id = str(
+            getattr(context, 'chat_id', None) or getattr(context, 'session_id', '') or ''
+        )
+        dataset_version = transformation_history.get_version(str(getattr(context, 'dataset_id', '')))
+        try:
+            db_dataset_id = uuid.UUID(str(getattr(context, 'dataset_id', '')))
+            from db.session import get_db
+            from db.repositories.transformation_repository import transformation_repository
+            db = get_db()
+            if db is not None:
+                latest = transformation_repository.get_latest_version(db, db_dataset_id)
+                if latest is not None:
+                    dataset_version = max(dataset_version, int(latest.version_number))
+        except (ValueError, TypeError):
+            pass
+        except Exception as exc:
+            logger.debug('[TransformEngine] Could not read persisted dataset version: %s', exc)
+        pending = PendingTransformationContext.create(
+            transformation_id=operation.get('_pending_transformation_id') or str(uuid.uuid4()),
+            conversation_id=conversation_id,
+            dataset_id=str(getattr(context, 'dataset_id', '')),
+            dataset_version=dataset_version,
+            dataset_fingerprint=_compute_fingerprint(df),
+            operation_type=str(operation.get('type', '')),
+            operation_payload=dict(operation),
+            source_typed_literal=operation.get('_old_typed'),
+            destination_typed_literal=operation.get('_new_typed') or operation.get('_value_typed'),
+            candidate_columns=list(candidates),
+            selected_columns=list(operation.get('columns') or []) or None,
+            scope=operation.get('scope'),
+            missing_slots=list(missing_slots),
+            original_request=getattr(context, 'message', '') or '',
+            latest_question=question,
+            clarification_type=clarification_type,
+        )
+        transformation_store.set_pending(pending)
+        logger.info(
+            '[TransformEngine] Awaiting clarification transformation=%s dataset=%s slots=%s candidates=%s',
+            pending.transformation_id, pending.dataset_id, pending.missing_slots,
+            pending.candidate_columns,
+        )
+        return EngineResult(
+            answer=question, source='transform', provider='system', success=True,
+            metadata={
+                'transform_plan': None,
+                'clarification': {
+                    'status': 'AWAITING_CLARIFICATION',
+                    'transformation_id': pending.transformation_id,
+                    'clarification_type': pending.clarification_type,
+                    'question': pending.latest_question,
+                    'candidate_columns': pending.candidate_columns,
+                    'missing_slots': pending.missing_slots,
+                    'operation': pending.operation_type,
+                    'source': pending.source_typed_literal,
+                    'destination': pending.destination_typed_literal,
+                    'suggested_scopes': [
+                        {'type': 'ALL_MATCHING_COLUMNS', 'label': 'All matching columns'},
+                        *[
+                            {'type': 'EXPLICIT_COLUMNS', 'column': column, 'label': str(column)}
+                            for column in pending.candidate_columns
+                        ],
+                    ],
+                    **(extra_metadata or {})
+                },
+            },
+            should_compose=False,
+        )
+
+    def _persist_plan(self, context, plan, entry):
+        """Persist plan to PostgreSQL — best-effort, never raises."""
+        try:
+            from db.session import get_db
+            from db.repositories.transformation_repository import transformation_repository
+            db = get_db()
+            if db is None:
+                return
+
+            # Get the db-level dataset_id (may differ from registry key)
+            db_dataset_id = None
+            if entry and hasattr(entry, 'dataset_id'):
+                try:
+                    db_dataset_id = uuid.UUID(str(entry.dataset_id))
+                except Exception:
+                    pass
+            if db_dataset_id is None:
+                try:
+                    db_dataset_id = uuid.UUID(plan.dataset_id)
+                except Exception:
+                    return
+
+            user_id = getattr(context, 'user_id', None)
+            chat_id = getattr(context, 'chat_id', None)
+
+            transformation_repository.create_plan(
+                db,
+                plan_id=uuid.UUID(plan.plan_id),
+                dataset_id=db_dataset_id,
+                operation_type=plan.operation_type,
+                operation_payload=plan.operation_payload,
+                operation_code=plan.operation_code,
+                affected_rows_count=plan.affected_rows_count,
+                affected_cells_count=plan.affected_cells_count,
+                before_sample=[{
+                    'row_index': c.row_index,
+                    'source_row_number': c.source_row_number,
+                    'column': c.column,
+                    'before': str(c.before) if c.before is not None else None,
+                    'after': str(c.after) if c.after is not None else None,
+                } for c in plan.before_sample],
+                dataset_fingerprint=plan.dataset_fingerprint,
+                user_id=uuid.UUID(str(user_id)) if user_id else None,
+                chat_id=uuid.UUID(str(chat_id)) if chat_id else None,
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning('[TransformEngine] Plan persist failed (non-fatal): %s', e)
+
+    def _plan_to_dict(self, plan) -> dict:
+        import math
+        import pandas as pd
+        def _is_nan(v):
+            try:
+                if v is None: return False
+                if isinstance(v, float) and math.isnan(v): return True
+                if pd.isna(v): return True
+                return False
+            except:
+                return False
+
+        return {
+            'plan_id': plan.plan_id,
+            'dataset_id': plan.dataset_id,
+            'operation_type': plan.operation_type,
+            'operation_label': plan.operation_label,
+            'operation_code': plan.operation_code,
+            'affected_rows_count': plan.affected_rows_count,
+            'affected_cells_count': plan.affected_cells_count,
+            'affected_columns': plan.affected_columns,
+            'operation_payload': getattr(plan, 'operation_payload', {}),
+            'intelligence_provenance': getattr(plan, 'intelligence_provenance', None),
+            'before_sample': [{
+                'row_index': c.row_index,
+                'source_row_number': c.source_row_number,
+                'column': c.column,
+                'before': None if _is_nan(c.before) else (c.before if c.before is None or isinstance(c.before, (int, float, bool, str)) else str(c.before)),
+                'after': None if _is_nan(c.after) else (c.after if c.after is None or isinstance(c.after, (int, float, bool, str)) else str(c.after)),
+            } for c in plan.before_sample],
+            'warnings': plan.warnings,
+            'created_at': plan.created_at,
+            'intelligence_provenance': getattr(plan, 'intelligence_provenance', None),
+        }
+
+
+transform_engine = TransformEngine()

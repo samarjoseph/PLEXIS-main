@@ -100,6 +100,29 @@ class ResponseComposer:
         if response.success:
             result.answer = response.text
             result.provider = response.provider
+
+            # Grounding verification for analytical results:
+            # Ensure the composed response does not omit or contradict primary analytical values.
+            if has_analytical_facts and isinstance(facts, dict):
+                ops = facts.get('operations', [])
+                for op_item in ops:
+                    if op_item.get('operation') == 'hypothetical':
+                        op_v = op_item.get('value', {})
+                        if isinstance(op_v, dict):
+                            h_val = op_v.get('hypothetical_value')
+                            if h_val is not None:
+                                h_2f = f"{h_val:.2f}"
+                                h_4f = f"{h_val:,.4f}".rstrip('0').rstrip('.') if isinstance(h_val, float) else str(h_val)
+                                h_1f = str(round(h_val, 1))
+                                ans_text = response.text or ""
+                                if h_2f not in ans_text and h_4f not in ans_text and h_1f not in ans_text:
+                                    logger.warning(
+                                        f"[ResponseComposer] Composed text omitted hypothetical_value {h_val}. "
+                                        "Falling back to verified engine narrative to guarantee accuracy."
+                                    )
+                                    computed = facts.get('computed_answer')
+                                    if computed and computed.strip():
+                                        result.answer = computed
         else:
             logger.warning("ResponseComposer generation failed: %s", response.error)
 
@@ -107,14 +130,23 @@ class ResponseComposer:
             # If the analytical result is verified, build a short factual answer
             # from the structured data rather than showing a blank/error response.
             # The verified result is NEVER discarded due to a composer failure.
-            deterministic_answer = self._build_deterministic_answer(context)
-            if deterministic_answer:
-                result.answer = deterministic_answer
-                result.composer_failed = True   # surfaced in response metadata
-                logger.info("ResponseComposer: using deterministic fallback answer.")
-            else:
-                result.answer = "I computed the result but couldn't generate the full explanation right now."
+            if result.answer and result.answer.strip():
+                # Preserve the verified analytical narrative computed by the engine
                 result.composer_failed = True
+                logger.info("ResponseComposer: preserving engine computed narrative.")
+            else:
+                deterministic_answer = self._build_deterministic_answer(context)
+                if deterministic_answer:
+                    result.answer = deterministic_answer
+                    result.composer_failed = True
+                    logger.info("ResponseComposer: using deterministic fallback answer.")
+                else:
+                    computed = (getattr(result, 'facts', {}) or {}).get('computed_answer')
+                    if computed and computed.strip():
+                        result.answer = computed
+                    else:
+                        result.answer = "I computed the result but couldn't generate the full explanation right now."
+                    result.composer_failed = True
 
             result.error = response.error
 

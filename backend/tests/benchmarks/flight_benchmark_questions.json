@@ -1,0 +1,362 @@
+[
+  {
+    "id": "Q01",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Dataset dimensions",
+    "question": "How many rows and columns does this dataset contain?"
+  },
+  {
+    "id": "Q02",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Date range",
+    "question": "What are the earliest and latest flight dates? Report the number of distinct calendar dates represented."
+  },
+  {
+    "id": "Q03",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Missing values",
+    "question": "What is the total number of missing cells across the entire dataset, and which columns contain missing values?"
+  },
+  {
+    "id": "Q04",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Schema and data types",
+    "question": "What are the data types of all 23 columns? Identify numeric, categorical, date-like, identifier, and binary/flag columns, distinguishing observed types from inferred semantic roles."
+  },
+  {
+    "id": "Q05",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Categorical cardinality",
+    "question": "How many distinct airlines, origin airports, destination airports, and weather categories exist?"
+  },
+  {
+    "id": "Q06",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Identifier uniqueness",
+    "question": "How many unique flight numbers exist? Are flight numbers unique across all 150,000 rows?"
+  },
+  {
+    "id": "Q07",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Duplicate rows",
+    "question": "Are there any exact duplicate rows? Report the exact count and explain whether duplicate rows are included in the original row count."
+  },
+  {
+    "id": "Q08",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Route cardinality",
+    "question": "How many distinct origin-destination airport pairs exist? Return the five most frequent routes and their counts."
+  },
+  {
+    "id": "Q09",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Target variable distribution",
+    "question": "What are the minimum, maximum, mean, and median values of Departure_Delay? Report the units only if supported by the dataset's definition."
+  },
+  {
+    "id": "Q10",
+    "level": "Level 1 — Dataset fundamentals and schema",
+    "category": "Binary target distribution",
+    "question": "How many rows have Delay_Target = 1 and how many have Delay_Target = 0? Also report any unexpected or missing target values."
+  },
+  {
+    "id": "Q11",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Grouped aggregation and ranking",
+    "question": "What is the average departure delay for each airline, ranked from highest to lowest? Include the number of observations for each airline."
+  },
+  {
+    "id": "Q12",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Weather impact",
+    "question": "What is the mean and median departure delay for each weather category? Include observation counts."
+  },
+  {
+    "id": "Q13",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Top origin delays",
+    "question": "Which five origin airports have the highest average departure delay? Report both their average delays and sample counts."
+  },
+  {
+    "id": "Q14",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Top destination delays",
+    "question": "Which five destination airports have the highest average departure delay? Report their averages and sample counts."
+  },
+  {
+    "id": "Q15",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Monthly seasonality",
+    "question": "What is the average Departure_Delay for each month, sorted chronologically from month 1 through month 12?"
+  },
+  {
+    "id": "Q16",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Summary statistics",
+    "question": "What are the mean, median, minimum, maximum, standard deviation, and interquartile range of Previous_Flight_Delay_Minutes?"
+  },
+  {
+    "id": "Q17",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Percentiles",
+    "question": "Calculate the mean, median, standard deviation, and 90th percentile of Origin_Congestion_Index."
+  },
+  {
+    "id": "Q18",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Delay rate by airline",
+    "question": "Which five airlines have the highest proportion of rows with Delay_Target = 1? Report the numerator, denominator, and rate for each airline."
+  },
+  {
+    "id": "Q19",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Delay rate by weather",
+    "question": "How does the distribution of Delay_Target vary across weather categories? Report counts and row-based percentages within each weather category."
+  },
+  {
+    "id": "Q20",
+    "level": "Level 2 — Statistics and core aggregations",
+    "category": "Peak hour comparison",
+    "question": "Calculate the mean and median departure delay for flights marked Peak_Hour = 1 versus Peak_Hour = 0. Include sample sizes and the difference in means."
+  },
+  {
+    "id": "Q21",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Multi-index aggregation",
+    "question": "For each airline, calculate average departure delay by month. Identify the highest-average-delay month for each airline and report the supporting observation count."
+  },
+  {
+    "id": "Q22",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Filtered route ranking",
+    "question": "Which five origin-destination routes have the highest average departure delay? Exclude routes with fewer than 100 observations and report the count for each selected route."
+  },
+  {
+    "id": "Q23",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Airport delay proportion",
+    "question": "Which origin airport has the highest proportion of Delay_Target = 1? Report the numerator, denominator, rate, and ranking of the top five eligible airports. State any minimum-sample-size rule used."
+  },
+  {
+    "id": "Q24",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Weekend vs weekday comparison",
+    "question": "For each airline, compare the average Departure_Delay on weekends versus weekdays. Report both group means, group sizes, and the difference."
+  },
+  {
+    "id": "Q25",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Interaction analysis",
+    "question": "Compare average departure delay for each Weather category across Peak_Hour groups. Identify the largest absolute difference and show the supporting group counts."
+  },
+  {
+    "id": "Q26",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Monthly rank concordance",
+    "question": "For each month, report the mean departure delay and the proportion of Delay_Target = 1. Determine whether the monthly rankings for these two metrics are identical."
+  },
+  {
+    "id": "Q27",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Day of week breakdown",
+    "question": "For each Day_of_Week value, report average departure delay, median departure delay, row count, and target-positive rate. Do not assign weekday names unless the numbering convention is verified."
+  },
+  {
+    "id": "Q28",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Route peak sensitivity",
+    "question": "Which five routes have the largest absolute difference between mean departure delays in the two Peak_Hour groups? Require at least 100 observations in each group for a route to qualify."
+  },
+  {
+    "id": "Q29",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Quartile grouping",
+    "question": "Compare departure-delay distributions across Origin_Congestion_Index quartiles. Report the quartile boundaries, sample counts, mean delays, medians, and target-positive rates."
+  },
+  {
+    "id": "Q30",
+    "level": "Level 3 — Grouped analysis and ranking",
+    "category": "Two-factor ranking",
+    "question": "Which combinations of airline and weather have the highest mean departure delay? Return the top 10 combinations, including sample counts, and explain how ties are handled."
+  },
+  {
+    "id": "Q31",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Correlation matrix",
+    "question": "Calculate the correlation matrix between Departure_Delay, Previous_Flight_Delay_Minutes, Turnaround_Risk_Index, Origin_Congestion_Index, Temperature_C, Humidity_pct, Wind_Speed_kmh, Visibility_km, Rainfall_mm, and Cloud_Cover_pct. Identify the strongest positive and strongest negative off-diagonal correlations."
+  },
+  {
+    "id": "Q32",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Bivariate correlation",
+    "question": "What is the correlation between Previous_Flight_Delay_Minutes and Departure_Delay? State the sample size, missing-value policy, and interpretation limits."
+  },
+  {
+    "id": "Q33",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Non-linear correlation",
+    "question": "Is Origin_Congestion_Index associated with Departure_Delay? Calculate Pearson and Spearman correlations and compare the results."
+  },
+  {
+    "id": "Q34",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Risk index quartiles",
+    "question": "Compare mean departure delay across quartiles of Turnaround_Risk_Index. Report quartile boundaries, group counts, mean delays, and target-positive rates."
+  },
+  {
+    "id": "Q35",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Visibility relationship",
+    "question": "Does visibility have a relationship with departure delay? Calculate Pearson and Spearman correlations and compare mean delays across visibility quartiles."
+  },
+  {
+    "id": "Q36",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Rainfall threshold comparison",
+    "question": "Compare average departure delay for rows with zero rainfall against rows with positive rainfall. Report sample counts, mean delays, median delays, and the difference in means."
+  },
+  {
+    "id": "Q37",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Humidity quartiles",
+    "question": "Compare target-positive rates across quartiles of Humidity_pct. Report boundaries, counts, rates, and percentage-point differences between the highest and lowest quartiles."
+  },
+  {
+    "id": "Q38",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Temporal consistency",
+    "question": "Does Month agree with the calendar month extracted from Flight_Date for every row? Report the mismatch count and examples, if any."
+  },
+  {
+    "id": "Q39",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Weekday encoding",
+    "question": "Does Day_of_Week agree with the weekday extracted from Flight_Date? First determine the observed encoding convention, then report the mismatch count and examples."
+  },
+  {
+    "id": "Q40",
+    "level": "Level 4 — Multi-step analysis and statistical reasoning",
+    "category": "Weekend consistency",
+    "question": "Does Is_Weekend agree with the weekend definition implied by Flight_Date and the observed day-of-week encoding? State the weekend definition used and report the mismatch count."
+  },
+  {
+    "id": "Q41",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Compound filtering",
+    "question": "Filter flights where Departure_Delay is above the overall median and Origin_Congestion_Index is above its overall 75th percentile. How many rows qualify, and what is their average departure delay and target-positive rate?"
+  },
+  {
+    "id": "Q42",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Tail risk subset",
+    "question": "Among rows with Visibility_km below its 10th percentile, which weather category has the highest target-positive rate? Report its count, denominator, rate, and comparison against the overall rate."
+  },
+  {
+    "id": "Q43",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Conditional route delays",
+    "question": "Find the five routes with the highest average Departure_Delay among rows where Previous_Flight_Delay_Minutes is greater than zero. Require at least 100 eligible observations per route."
+  },
+  {
+    "id": "Q44",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Joint condition rate",
+    "question": "For each airline, calculate the percentage of rows with both Peak_Hour = 1 and Delay_Target = 1. Include the numerator, denominator, and rate, and rank the airlines."
+  },
+  {
+    "id": "Q45",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Target calibration by quartile",
+    "question": "Create a temporary grouping of Departure_Delay into quartiles. Compare the distribution of Delay_Target across those quartiles and report target-positive rates and row counts. Do not modify the source dataset."
+  },
+  {
+    "id": "Q46",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Delay propagation",
+    "question": "Calculate the difference between the mean departure delay for flights with Previous_Flight_Delay_Minutes = 0 and those with a positive previous-flight delay. Include group counts, means, medians, and the difference in means."
+  },
+  {
+    "id": "Q47",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Date-month audit",
+    "question": "Identify rows where Flight_Date indicates one month but Month indicates another. Report the total count, mismatch percentage, and representative examples. If no mismatches exist, report zero and verify it."
+  },
+  {
+    "id": "Q48",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Target domain audit",
+    "question": "Identify rows where Delay_Target is outside the observed binary values 0 and 1. Report invalid values and counts, if any, without assuming that a particular target threshold is correct."
+  },
+  {
+    "id": "Q49",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Median split comparison",
+    "question": "Compare Delay_Target rates between flights with above-median and at-or-below-median Turnaround_Risk_Index. State the median boundary, both denominators, rates, and percentage-point difference."
+  },
+  {
+    "id": "Q50",
+    "level": "Level 5 — Hard filters, derived metrics, and data quality",
+    "category": "Label normalization check",
+    "question": "Compare average departure delay by origin-destination route after normalizing route labels only for analysis, if normalization is necessary. Explain the normalization and show whether it changes the number of distinct route groups. Do not mutate the source dataset."
+  },
+  {
+    "id": "Q51",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Unsupported column: ticket price",
+    "question": "What is the average passenger ticket price in this dataset?"
+  },
+  {
+    "id": "Q52",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Unsupported column: passenger count",
+    "question": "How many passengers were on each flight?"
+  },
+  {
+    "id": "Q53",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Ambiguous delay metric",
+    "question": "What is the average flight delay?"
+  },
+  {
+    "id": "Q54",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Rule verification",
+    "question": "Does Delay_Target = 1 mean that the flight was delayed by at least 15 minutes? Verify whether the dataset supports this exact rule by inspecting the relationship between Delay_Target and Departure_Delay. Report mismatches if this definition is being tested, and do not assume that the rule is correct."
+  },
+  {
+    "id": "Q55",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Hypothetical filtering: peak hours",
+    "question": "If every row with Peak_Hour = 0 were temporarily excluded, what would the average Departure_Delay be among the remaining rows? Calculate this as a read-only hypothetical operation and leave the dataset unchanged."
+  },
+  {
+    "id": "Q56",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Hypothetical filtering: visibility",
+    "question": "If all rows with Visibility_km below 5 were temporarily removed, how would the mean departure delay change? Report the original mean, the hypothetical mean, the difference, and the number of rows retained. Do not mutate the dataset."
+  },
+  {
+    "id": "Q57",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Hypothetical transformation: clipping",
+    "question": "If Turnaround_Risk_Index values were hypothetically clipped to the interval [0, 100], how many values would change and what would the resulting mean be? First inspect the actual range. Do not apply the transformation to the source dataset."
+  },
+  {
+    "id": "Q58",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Compound probability",
+    "question": "Calculate the percentage of rows with Origin_Congestion_Index above 80 and Previous_Flight_Delay_Minutes greater than zero. Report the qualifying count and total-row denominator."
+  },
+  {
+    "id": "Q59",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Unsupported column: customer satisfaction",
+    "question": "Calculate a customer satisfaction score for each airline."
+  },
+  {
+    "id": "Q60",
+    "level": "Level 6 — Adversarial, hypothetical, and hallucination-resistance tests",
+    "category": "Target leakage reasoning",
+    "question": "If the goal is to predict Delay_Target, which available columns could cause target leakage or require further investigation? Identify Departure_Delay as a potential leakage risk, explain why, and distinguish observed dataset facts from assumptions about how the target was generated. Do not train a model or change the dataset."
+  }
+]

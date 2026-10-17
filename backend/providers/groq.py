@@ -145,7 +145,9 @@ class GroqProvider(IProviderAdapter):
                     provider=self._name,
                     latency_ms=latency_ms,
                     success=False,
-                    error=f"HTTP {response.status_code}: model '{model_name}' not available on Groq"
+                    error=f"HTTP {response.status_code}: model '{model_name}' not available on Groq",
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
                 )
 
             response.raise_for_status()
@@ -170,13 +172,20 @@ class GroqProvider(IProviderAdapter):
         except Exception as e:
             latency_ms = (time.time() - start_time) * 1000
             logger.error("[GroqProvider] generate() error: %s", e)
+            status_code = getattr(getattr(e, 'response', None), 'status_code', None)
+            resp_headers = dict(getattr(getattr(e, 'response', None), 'headers', {})) if getattr(e, 'response', None) else None
+            from providers.quarantine import parse_retry_after
+            retry_after = parse_retry_after(resp_headers.get("retry-after") or resp_headers.get("Retry-After")) if resp_headers else None
             return ProviderResponse(
                 text="",
                 model=model_name,
                 provider=self._name,
                 latency_ms=latency_ms,
                 success=False,
-                error=str(e)
+                error=str(e),
+                status_code=status_code,
+                headers=resp_headers,
+                retry_after=retry_after
             )
 
     def generate_stream(self, request: AIRequest) -> Generator[str, None, None]:

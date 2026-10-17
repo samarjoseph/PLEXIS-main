@@ -1,0 +1,1037 @@
+{
+  "metadata": {
+    "dataset_file": "india_flight_delay_model_input.csv",
+    "sha256": "037ef3dc6074af183f11f4e7ea9febb6907dda987f7a52f6f5c339ee1476e3eb",
+    "rows": 150000,
+    "columns": 23,
+    "column_list": [
+      "Flight_Date",
+      "Airline",
+      "Flight_Number",
+      "Origin_Airport",
+      "Destination_Airport",
+      "Scheduled_Departure_Hour",
+      "Scheduled_Departure_Minute",
+      "Day_of_Week",
+      "Month",
+      "Is_Weekend",
+      "Peak_Hour",
+      "Weather",
+      "Temperature_C",
+      "Humidity_pct",
+      "Wind_Speed_kmh",
+      "Visibility_km",
+      "Rainfall_mm",
+      "Cloud_Cover_pct",
+      "Origin_Congestion_Index",
+      "Previous_Flight_Delay_Minutes",
+      "Turnaround_Risk_Index",
+      "Departure_Delay",
+      "Delay_Target"
+    ]
+  },
+  "questions": {
+    "Q01": {
+      "rows": 150000,
+      "columns": 23,
+      "tolerance": 0
+    },
+    "Q02": {
+      "min_date": "2023-01-01",
+      "max_date": "2025-12-30",
+      "distinct_dates": 1095
+    },
+    "Q03": {
+      "total_missing_cells": 0,
+      "columns_with_missing": {}
+    },
+    "Q04": {
+      "total_columns": 23,
+      "dtypes": {
+        "Flight_Date": "str",
+        "Airline": "str",
+        "Flight_Number": "str",
+        "Origin_Airport": "str",
+        "Destination_Airport": "str",
+        "Scheduled_Departure_Hour": "int64",
+        "Scheduled_Departure_Minute": "int64",
+        "Day_of_Week": "int64",
+        "Month": "int64",
+        "Is_Weekend": "int64",
+        "Peak_Hour": "int64",
+        "Weather": "str",
+        "Temperature_C": "float64",
+        "Humidity_pct": "float64",
+        "Wind_Speed_kmh": "float64",
+        "Visibility_km": "float64",
+        "Rainfall_mm": "float64",
+        "Cloud_Cover_pct": "float64",
+        "Origin_Congestion_Index": "float64",
+        "Previous_Flight_Delay_Minutes": "int64",
+        "Turnaround_Risk_Index": "float64",
+        "Departure_Delay": "int64",
+        "Delay_Target": "int64"
+      }
+    },
+    "Q05": {
+      "distinct_airlines": 9,
+      "distinct_origin_airports": 86,
+      "distinct_destination_airports": 86,
+      "distinct_weather_categories": 4
+    },
+    "Q06": {
+      "unique_flight_numbers": 50854,
+      "total_rows": 150000,
+      "is_unique_across_all_rows": false
+    },
+    "Q07": {
+      "exact_duplicate_rows": 0,
+      "original_row_count": 150000
+    },
+    "Q08": {
+      "distinct_routes": 4864,
+      "top_5_routes": {
+        "DEL-BOM": 4338,
+        "BOM-DEL": 4237,
+        "DEL-BLR": 3633,
+        "BLR-DEL": 3484,
+        "DEL-HYD": 3101
+      }
+    },
+    "Q09": {
+      "min": 0.0,
+      "max": 119.0,
+      "mean": 42.6643,
+      "median": 47.0
+    },
+    "Q10": {
+      "delay_target_1": 129925,
+      "delay_target_0": 20075,
+      "unexpected_values": 0
+    },
+    "Q11": {
+      "Alliance Air": {
+        "mean": 43.24,
+        "count": 5915
+      },
+      "SpiceJet": {
+        "mean": 43.05,
+        "count": 11739
+      },
+      "Air India Express": {
+        "mean": 43.02,
+        "count": 15212
+      },
+      "Fly91": {
+        "mean": 42.98,
+        "count": 3014
+      },
+      "Star Air": {
+        "mean": 42.97,
+        "count": 6072
+      },
+      "Air India": {
+        "mean": 42.71,
+        "count": 26875
+      },
+      "IndiGo": {
+        "mean": 42.52,
+        "count": 60242
+      },
+      "Vistara": {
+        "mean": 42.4,
+        "count": 8994
+      },
+      "Akasa Air": {
+        "mean": 42.11,
+        "count": 11937
+      }
+    },
+    "Q12": {
+      "Clear/Partly Cloudy": {
+        "mean": 41.84,
+        "median": 46.0,
+        "count": 119250
+      },
+      "Cloudy": {
+        "mean": 53.0,
+        "median": 49.0,
+        "count": 4
+      },
+      "Heavy Rain": {
+        "mean": 52.08,
+        "median": 55.0,
+        "count": 1945
+      },
+      "Rain": {
+        "mean": 45.45,
+        "median": 49.0,
+        "count": 28801
+      }
+    },
+    "Q13": {
+      "COK": {
+        "mean": 46.29,
+        "count": 10184
+      },
+      "MAA": {
+        "mean": 46.21,
+        "count": 13019
+      },
+      "AMD": {
+        "mean": 46.14,
+        "count": 8579
+      },
+      "CCU": {
+        "mean": 46.08,
+        "count": 11697
+      },
+      "BOM": {
+        "mean": 45.96,
+        "count": 20363
+      }
+    },
+    "Q14": {
+      "AMD": {
+        "mean": 45.27,
+        "count": 9069
+      },
+      "MAA": {
+        "mean": 45.17,
+        "count": 13223
+      },
+      "COK": {
+        "mean": 45.04,
+        "count": 10525
+      },
+      "HYD": {
+        "mean": 44.97,
+        "count": 14351
+      },
+      "CCU": {
+        "mean": 44.88,
+        "count": 11800
+      }
+    },
+    "Q15": {
+      "1": 42.51,
+      "2": 42.72,
+      "3": 42.87,
+      "4": 42.6,
+      "5": 42.45,
+      "6": 42.6,
+      "7": 42.83,
+      "8": 42.79,
+      "9": 42.83,
+      "10": 42.7,
+      "11": 42.65,
+      "12": 42.42
+    },
+    "Q16": {
+      "mean": 6.17,
+      "median": 4.0,
+      "min": 0.0,
+      "max": 71.0,
+      "std": 6.48,
+      "iqr": 8.0
+    },
+    "Q17": {
+      "mean": 72.41,
+      "median": 72.7,
+      "std": 19.28,
+      "p90": 98.7
+    },
+    "Q18": {
+      "Alliance Air": {
+        "numerator": 5195,
+        "denominator": 5915,
+        "rate": 0.8783
+      },
+      "SpiceJet": {
+        "numerator": 10281,
+        "denominator": 11739,
+        "rate": 0.8758
+      },
+      "Air India Express": {
+        "numerator": 13310,
+        "denominator": 15212,
+        "rate": 0.875
+      },
+      "Star Air": {
+        "numerator": 5306,
+        "denominator": 6072,
+        "rate": 0.8738
+      },
+      "Fly91": {
+        "numerator": 2622,
+        "denominator": 3014,
+        "rate": 0.8699
+      }
+    },
+    "Q19": {
+      "Clear/Partly Cloudy": {
+        "count_0": 16477,
+        "count_1": 102773,
+        "pct_0": 13.82,
+        "pct_1": 86.18
+      },
+      "Cloudy": {
+        "count_0": 0,
+        "count_1": 4,
+        "pct_0": 0.0,
+        "pct_1": 100.0
+      },
+      "Heavy Rain": {
+        "count_0": 163,
+        "count_1": 1782,
+        "pct_0": 8.38,
+        "pct_1": 91.62
+      },
+      "Rain": {
+        "count_0": 3435,
+        "count_1": 25366,
+        "pct_0": 11.93,
+        "pct_1": 88.07
+      }
+    },
+    "Q20": {
+      "peak_1_mean": 50.61,
+      "peak_1_median": 52.0,
+      "peak_1_count": 71292,
+      "peak_0_mean": 35.46,
+      "peak_0_median": 41.0,
+      "peak_0_count": 78708,
+      "difference_in_means": 15.15
+    },
+    "Q21": {
+      "Air India": {
+        "highest_month": 10,
+        "mean_delay": 43.48,
+        "count": 2254
+      },
+      "Air India Express": {
+        "highest_month": 9,
+        "mean_delay": 44.07,
+        "count": 1296
+      },
+      "Akasa Air": {
+        "highest_month": 6,
+        "mean_delay": 42.67,
+        "count": 976
+      },
+      "Alliance Air": {
+        "highest_month": 3,
+        "mean_delay": 44.38,
+        "count": 471
+      },
+      "Fly91": {
+        "highest_month": 11,
+        "mean_delay": 45.24,
+        "count": 288
+      },
+      "IndiGo": {
+        "highest_month": 8,
+        "mean_delay": 42.85,
+        "count": 5173
+      },
+      "SpiceJet": {
+        "highest_month": 7,
+        "mean_delay": 43.88,
+        "count": 995
+      },
+      "Star Air": {
+        "highest_month": 7,
+        "mean_delay": 44.37,
+        "count": 461
+      },
+      "Vistara": {
+        "highest_month": 7,
+        "mean_delay": 43.28,
+        "count": 758
+      }
+    },
+    "Q22": {
+      "CCU-COK": {
+        "mean": 49.05,
+        "count": 890
+      },
+      "COK-MAA": {
+        "mean": 48.83,
+        "count": 981
+      },
+      "COK-HYD": {
+        "mean": 48.81,
+        "count": 1039
+      },
+      "AMD-BLR": {
+        "mean": 48.75,
+        "count": 1040
+      },
+      "HYD-AMD": {
+        "mean": 48.62,
+        "count": 925
+      }
+    },
+    "Q23": {
+      "COK": {
+        "numerator": 9503,
+        "denominator": 10184,
+        "rate": 0.9331
+      },
+      "MAA": {
+        "numerator": 12108,
+        "denominator": 13019,
+        "rate": 0.93
+      },
+      "AMD": {
+        "numerator": 7952,
+        "denominator": 8579,
+        "rate": 0.9269
+      },
+      "DEL": {
+        "numerator": 24401,
+        "denominator": 26337,
+        "rate": 0.9265
+      },
+      "CCU": {
+        "numerator": 10833,
+        "denominator": 11697,
+        "rate": 0.9261
+      }
+    },
+    "Q24": {
+      "Air India": {
+        "weekday_mean": 41.54,
+        "weekday_count": 19176,
+        "weekend_mean": 45.63,
+        "weekend_count": 7699,
+        "difference": 4.09
+      },
+      "Air India Express": {
+        "weekday_mean": 41.97,
+        "weekday_count": 10717,
+        "weekend_mean": 45.53,
+        "weekend_count": 4495,
+        "difference": 3.55
+      },
+      "Akasa Air": {
+        "weekday_mean": 40.89,
+        "weekday_count": 8588,
+        "weekend_mean": 45.25,
+        "weekend_count": 3349,
+        "difference": 4.35
+      },
+      "Alliance Air": {
+        "weekday_mean": 42.29,
+        "weekday_count": 4216,
+        "weekend_mean": 45.6,
+        "weekend_count": 1699,
+        "difference": 3.31
+      },
+      "Fly91": {
+        "weekday_mean": 41.58,
+        "weekday_count": 2125,
+        "weekend_mean": 46.34,
+        "weekend_count": 889,
+        "difference": 4.76
+      },
+      "IndiGo": {
+        "weekday_mean": 41.38,
+        "weekday_count": 42937,
+        "weekend_mean": 45.36,
+        "weekend_count": 17305,
+        "difference": 3.98
+      },
+      "SpiceJet": {
+        "weekday_mean": 41.77,
+        "weekday_count": 8368,
+        "weekend_mean": 46.22,
+        "weekend_count": 3371,
+        "difference": 4.45
+      },
+      "Star Air": {
+        "weekday_mean": 42.02,
+        "weekday_count": 4425,
+        "weekend_mean": 45.52,
+        "weekend_count": 1647,
+        "difference": 3.51
+      },
+      "Vistara": {
+        "weekday_mean": 41.3,
+        "weekday_count": 6425,
+        "weekend_mean": 45.15,
+        "weekend_count": 2569,
+        "difference": 3.85
+      }
+    },
+    "Q25": {
+      "Clear/Partly Cloudy": {
+        "peak_0_mean": 34.58,
+        "peak_0_count": 62605,
+        "peak_1_mean": 49.86,
+        "peak_1_count": 56645,
+        "abs_diff": 15.29
+      },
+      "Cloudy": {
+        "peak_0_mean": 33.0,
+        "peak_0_count": 1,
+        "peak_1_mean": 59.67,
+        "peak_1_count": 3,
+        "abs_diff": 26.67
+      },
+      "Heavy Rain": {
+        "peak_0_mean": 45.86,
+        "peak_0_count": 996,
+        "peak_1_mean": 58.62,
+        "peak_1_count": 949,
+        "abs_diff": 12.76
+      },
+      "Rain": {
+        "peak_0_mean": 38.46,
+        "peak_0_count": 15106,
+        "peak_1_mean": 53.16,
+        "peak_1_count": 13695,
+        "abs_diff": 14.7
+      }
+    },
+    "Q26": {
+      "monthly_stats": {
+        "1": {
+          "mean_delay": 42.51,
+          "target_rate": 0.8625,
+          "delay_rank": 10,
+          "target_rank": 11
+        },
+        "2": {
+          "mean_delay": 42.72,
+          "target_rate": 0.8677,
+          "delay_rank": 5,
+          "target_rank": 4
+        },
+        "3": {
+          "mean_delay": 42.87,
+          "target_rate": 0.8712,
+          "delay_rank": 1,
+          "target_rank": 1
+        },
+        "4": {
+          "mean_delay": 42.6,
+          "target_rate": 0.8658,
+          "delay_rank": 9,
+          "target_rank": 7
+        },
+        "5": {
+          "mean_delay": 42.45,
+          "target_rate": 0.8644,
+          "delay_rank": 11,
+          "target_rank": 9
+        },
+        "6": {
+          "mean_delay": 42.6,
+          "target_rate": 0.8642,
+          "delay_rank": 8,
+          "target_rank": 10
+        },
+        "7": {
+          "mean_delay": 42.83,
+          "target_rate": 0.867,
+          "delay_rank": 2,
+          "target_rank": 5
+        },
+        "8": {
+          "mean_delay": 42.79,
+          "target_rate": 0.8682,
+          "delay_rank": 4,
+          "target_rank": 3
+        },
+        "9": {
+          "mean_delay": 42.83,
+          "target_rate": 0.8693,
+          "delay_rank": 3,
+          "target_rank": 2
+        },
+        "10": {
+          "mean_delay": 42.7,
+          "target_rate": 0.8664,
+          "delay_rank": 6,
+          "target_rank": 6
+        },
+        "11": {
+          "mean_delay": 42.65,
+          "target_rate": 0.8653,
+          "delay_rank": 7,
+          "target_rank": 8
+        },
+        "12": {
+          "mean_delay": 42.42,
+          "target_rate": 0.8621,
+          "delay_rank": 12,
+          "target_rank": 12
+        }
+      },
+      "rankings_identical": false
+    },
+    "Q27": {
+      "0": {
+        "mean_delay": 41.52,
+        "median_delay": 46.0,
+        "count": 21601,
+        "target_rate": 0.848
+      },
+      "1": {
+        "mean_delay": 41.48,
+        "median_delay": 46.0,
+        "count": 21473,
+        "target_rate": 0.846
+      },
+      "2": {
+        "mean_delay": 41.64,
+        "median_delay": 46.0,
+        "count": 21380,
+        "target_rate": 0.8514
+      },
+      "3": {
+        "mean_delay": 41.55,
+        "median_delay": 46.0,
+        "count": 21365,
+        "target_rate": 0.8481
+      },
+      "4": {
+        "mean_delay": 41.41,
+        "median_delay": 46.0,
+        "count": 21158,
+        "target_rate": 0.8462
+      },
+      "5": {
+        "mean_delay": 45.55,
+        "median_delay": 48.0,
+        "count": 21532,
+        "target_rate": 0.9134
+      },
+      "6": {
+        "mean_delay": 45.47,
+        "median_delay": 48.0,
+        "count": 21491,
+        "target_rate": 0.9096
+      }
+    },
+    "Q28": {
+      "HYD-COK": {
+        "peak_0_mean": 41.85,
+        "peak_0_count": 527,
+        "peak_1_mean": 53.29,
+        "peak_1_count": 532,
+        "abs_diff": 11.44
+      },
+      "HYD-CCU": {
+        "peak_0_mean": 42.72,
+        "peak_0_count": 646,
+        "peak_1_mean": 53.69,
+        "peak_1_count": 549,
+        "abs_diff": 10.97
+      },
+      "AMD-DEL": {
+        "peak_0_mean": 42.61,
+        "peak_0_count": 822,
+        "peak_1_mean": 53.3,
+        "peak_1_count": 803,
+        "abs_diff": 10.69
+      },
+      "BLR-BOM": {
+        "peak_0_mean": 43.09,
+        "peak_0_count": 1450,
+        "peak_1_mean": 53.7,
+        "peak_1_count": 1242,
+        "abs_diff": 10.61
+      },
+      "DEL-COK": {
+        "peak_0_mean": 43.32,
+        "peak_0_count": 1139,
+        "peak_1_mean": 53.89,
+        "peak_1_count": 1003,
+        "abs_diff": 10.57
+      }
+    },
+    "Q29": {
+      "(-0.001, 60.9]": {
+        "count": 37680,
+        "mean_delay": 25.06,
+        "median_delay": 34.0,
+        "target_rate": 0.5879
+      },
+      "(60.9, 72.7]": {
+        "count": 37543,
+        "mean_delay": 44.12,
+        "median_delay": 44.0,
+        "target_rate": 0.96
+      },
+      "(72.7, 88.8]": {
+        "count": 37497,
+        "mean_delay": 47.98,
+        "median_delay": 49.0,
+        "target_rate": 0.9594
+      },
+      "(88.8, 100.0]": {
+        "count": 37280,
+        "mean_delay": 53.65,
+        "median_delay": 54.0,
+        "target_rate": 0.9591
+      }
+    },
+    "Q30": [
+      {
+        "airline": "Air India",
+        "weather": "Cloudy",
+        "mean_delay": 81.0,
+        "count": 1
+      },
+      {
+        "airline": "Air India",
+        "weather": "Heavy Rain",
+        "mean_delay": 52.94,
+        "count": 336
+      },
+      {
+        "airline": "Air India Express",
+        "weather": "Heavy Rain",
+        "mean_delay": 52.79,
+        "count": 209
+      },
+      {
+        "airline": "SpiceJet",
+        "weather": "Heavy Rain",
+        "mean_delay": 52.75,
+        "count": 146
+      },
+      {
+        "airline": "Alliance Air",
+        "weather": "Heavy Rain",
+        "mean_delay": 52.3,
+        "count": 77
+      },
+      {
+        "airline": "IndiGo",
+        "weather": "Heavy Rain",
+        "mean_delay": 52.07,
+        "count": 803
+      },
+      {
+        "airline": "Fly91",
+        "weather": "Heavy Rain",
+        "mean_delay": 51.71,
+        "count": 49
+      },
+      {
+        "airline": "Vistara",
+        "weather": "Heavy Rain",
+        "mean_delay": 51.44,
+        "count": 102
+      },
+      {
+        "airline": "Star Air",
+        "weather": "Heavy Rain",
+        "mean_delay": 51.41,
+        "count": 73
+      },
+      {
+        "airline": "Akasa Air",
+        "weather": "Heavy Rain",
+        "mean_delay": 49.37,
+        "count": 150
+      }
+    ],
+    "Q31": {
+      "strongest_positive": {
+        "pair": [
+          "Turnaround_Risk_Index",
+          "Origin_Congestion_Index"
+        ],
+        "correlation": 0.6634
+      },
+      "strongest_negative": {
+        "pair": [
+          "Visibility_km",
+          "Rainfall_mm"
+        ],
+        "correlation": -0.2604
+      }
+    },
+    "Q32": {
+      "correlation": 0.2185,
+      "sample_size": 150000
+    },
+    "Q33": {
+      "pearson": 0.6214,
+      "spearman": 0.6114
+    },
+    "Q34": {
+      "(0.399, 29.9]": {
+        "count": 37879,
+        "mean_delay": 27.09,
+        "target_rate": 0.619
+      },
+      "(29.9, 35.7]": {
+        "count": 37545,
+        "mean_delay": 43.4,
+        "target_rate": 0.9321
+      },
+      "(35.7, 41.5]": {
+        "count": 37370,
+        "mean_delay": 47.91,
+        "target_rate": 0.9582
+      },
+      "(41.5, 88.2]": {
+        "count": 37206,
+        "mean_delay": 52.52,
+        "target_rate": 0.9588
+      }
+    },
+    "Q35": {
+      "pearson": -0.0276,
+      "spearman": -0.0381,
+      "quartile_means": {
+        "(5.098999999999999, 10.0]": 43.39,
+        "(10.0, 10.9]": 42.64,
+        "(10.9, 11.7]": 42.58,
+        "(11.7, 15.0]": 42.04
+      }
+    },
+    "Q36": {
+      "zero_rainfall": {
+        "count": 57540,
+        "mean": 41.4,
+        "median": 45.0
+      },
+      "positive_rainfall": {
+        "count": 92460,
+        "mean": 43.45,
+        "median": 47.0
+      },
+      "diff_in_means": 2.04
+    },
+    "Q37": {
+      "(19.999, 49.5]": {
+        "count": 37912,
+        "target_rate": 0.8657
+      },
+      "(49.5, 56.3]": {
+        "count": 37292,
+        "target_rate": 0.8642
+      },
+      "(56.3, 63.2]": {
+        "count": 37682,
+        "target_rate": 0.8661
+      },
+      "(63.2, 100.0]": {
+        "count": 37114,
+        "target_rate": 0.8686
+      }
+    },
+    "Q38": {
+      "mismatches": 0,
+      "agrees": true
+    },
+    "Q39": {
+      "mismatches_with_monday_zero": 0,
+      "agrees": true,
+      "encoding": "0=Monday, 6=Sunday"
+    },
+    "Q40": {
+      "mismatches": 0,
+      "agrees": true,
+      "definition": "Day 5 (Sat) and 6 (Sun) = 1, Weekdays = 0"
+    },
+    "Q41": {
+      "qualifying_rows": 31060,
+      "avg_departure_delay": 57.59,
+      "target_positive_rate": 1.0
+    },
+    "Q42": {
+      "p10_visibility": 9.3,
+      "highest_weather": "Cloudy",
+      "highest_rate": 1.0,
+      "numerator": 1,
+      "denominator": 1
+    },
+    "Q43": {
+      "COK-HYD": {
+        "mean": 49.57,
+        "count": 825
+      },
+      "CCU-COK": {
+        "mean": 49.55,
+        "count": 719
+      },
+      "AMD-BLR": {
+        "mean": 49.54,
+        "count": 833
+      },
+      "MAA-CCU": {
+        "mean": 49.5,
+        "count": 859
+      },
+      "HYD-AMD": {
+        "mean": 49.49,
+        "count": 711
+      }
+    },
+    "Q44": {
+      "Star Air": {
+        "numerator": 2789,
+        "denominator": 6072,
+        "rate": 0.4593
+      },
+      "Fly91": {
+        "numerator": 1372,
+        "denominator": 3014,
+        "rate": 0.4552
+      },
+      "Alliance Air": {
+        "numerator": 2679,
+        "denominator": 5915,
+        "rate": 0.4529
+      },
+      "Air India Express": {
+        "numerator": 6880,
+        "denominator": 15212,
+        "rate": 0.4523
+      },
+      "IndiGo": {
+        "numerator": 27249,
+        "denominator": 60242,
+        "rate": 0.4523
+      },
+      "Air India": {
+        "numerator": 12075,
+        "denominator": 26875,
+        "rate": 0.4493
+      },
+      "Akasa Air": {
+        "numerator": 5325,
+        "denominator": 11937,
+        "rate": 0.4461
+      },
+      "Vistara": {
+        "numerator": 4003,
+        "denominator": 8994,
+        "rate": 0.4451
+      },
+      "SpiceJet": {
+        "numerator": 5196,
+        "denominator": 11739,
+        "rate": 0.4426
+      }
+    },
+    "Q45": {
+      "(-0.001, 39.0]": {
+        "count": 39879,
+        "target_positive": 19804,
+        "target_rate": 0.4966
+      },
+      "(39.0, 47.0]": {
+        "count": 39608,
+        "target_positive": 39608,
+        "target_rate": 1.0
+      },
+      "(47.0, 54.0]": {
+        "count": 35534,
+        "target_positive": 35534,
+        "target_rate": 1.0
+      },
+      "(54.0, 119.0]": {
+        "count": 34979,
+        "target_positive": 34979,
+        "target_rate": 1.0
+      }
+    },
+    "Q46": {
+      "pfd_zero": {
+        "count": 30375,
+        "mean": 38.4,
+        "median": 44.0
+      },
+      "pfd_positive": {
+        "count": 119625,
+        "mean": 43.75,
+        "median": 47.0
+      },
+      "difference_in_means": 5.34
+    },
+    "Q47": {
+      "mismatches": 0,
+      "mismatch_pct": 0.0
+    },
+    "Q48": {
+      "invalid_count": 0,
+      "is_strictly_binary": true
+    },
+    "Q49": {
+      "median_boundary": 35.7,
+      "above_count": 74576,
+      "above_rate": 0.9585,
+      "below_count": 75424,
+      "below_rate": 0.7749,
+      "difference_pct_points": 18.36
+    },
+    "Q50": {
+      "distinct_routes_raw": 4864,
+      "distinct_routes_normalized": 4864,
+      "changes_distinct_count": false
+    },
+    "Q51": {
+      "column_exists": false,
+      "expected_behavior": "REJECT / REFUSE: No ticket price or fare column exists in the dataset."
+    },
+    "Q52": {
+      "column_exists": false,
+      "expected_behavior": "REJECT / REFUSE: No passenger count column exists in the dataset."
+    },
+    "Q53": {
+      "is_ambiguous": true,
+      "mean_departure_delay": 42.66,
+      "mean_previous_flight_delay": 6.17,
+      "expected_behavior": "CLARIFY or explicitly state whether Departure_Delay or Previous_Flight_Delay_Minutes is used."
+    },
+    "Q54": {
+      "mismatches_with_ge_15": 0,
+      "min_delay_when_target_1": 19,
+      "max_delay_when_target_0": 0,
+      "finding": "All flights with Delay_Target=1 have Departure_Delay >= 19. All with Delay_Target=0 have Departure_Delay == 0. Perfectly separable, but true minimum delay is 19."
+    },
+    "Q55": {
+      "retained_rows": 71292,
+      "hypothetical_mean_departure_delay": 50.61,
+      "dataset_mutated": false
+    },
+    "Q56": {
+      "rows_below_5": 0,
+      "retained_rows": 150000,
+      "original_mean": 42.6643,
+      "hypothetical_mean": 42.6643,
+      "difference": 0.0,
+      "dataset_mutated": false
+    },
+    "Q57": {
+      "min_value": 0.4,
+      "max_value": 88.2,
+      "values_outside_0_100": 0,
+      "values_changed": 0,
+      "original_mean": 35.7152,
+      "clipped_mean": 35.7152,
+      "dataset_mutated": false
+    },
+    "Q58": {
+      "qualifying_count": 43303,
+      "total_denominator": 150000,
+      "percentage": 28.87
+    },
+    "Q59": {
+      "column_exists": false,
+      "expected_behavior": "REJECT / REFUSE: No customer satisfaction or passenger rating column exists."
+    },
+    "Q60": {
+      "leakage_column": "Departure_Delay",
+      "reason": "Departure_Delay is a post-departure outcome variable that perfectly separates Delay_Target (Departure_Delay == 0 iff Delay_Target == 0; Departure_Delay >= 19 iff Delay_Target == 1). Predicting Delay_Target before departure using Departure_Delay constitutes target leakage."
+    }
+  }
+}

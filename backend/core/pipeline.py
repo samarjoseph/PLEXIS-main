@@ -291,8 +291,8 @@ class RequestPipeline:
         """Record the exchange in conversation memory."""
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        conversation_memory.append(ctx.session_id, 'user', user_message, now)
-        conversation_memory.append(ctx.session_id, 'assistant', assistant_response, now)
+        conversation_memory.append(ctx.session_id, 'user', user_message, now, dataset_id=ctx.dataset_id)
+        conversation_memory.append(ctx.session_id, 'assistant', assistant_response, now, dataset_id=ctx.dataset_id)
 
 
 request_pipeline = RequestPipeline()

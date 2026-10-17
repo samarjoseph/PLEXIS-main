@@ -57,7 +57,8 @@ class ConversationMemory:
             self._session_to_chat[session_id] = chat_id
             logger.debug("[CONV_MEMORY] Registered chat_id=%s for session=%s", chat_id, session_id)
 
-    def append(self, session_id: str, role: str, content: str, timestamp: Optional[str] = None) -> None:
+    def append(self, session_id: str, role: str, content: str, timestamp: Optional[str] = None, dataset_id: Optional[str] = None) -> None:
+        session_id = f"{session_id}::{dataset_id}" if dataset_id else session_id
         """Append a message to session history (L1 only — thread-safe)."""
         with self._lock:
             if session_id not in self._history:
@@ -70,7 +71,9 @@ class ConversationMemory:
             if len(self._history[session_id]) > self._max_messages:
                 self._history[session_id] = self._history[session_id][-self._max_messages:]
 
-    def get_history(self, session_id: str, last_n: Optional[int] = None) -> List[Dict[str, str]]:
+    def get_history(self, session_id: str, last_n: Optional[int] = None, dataset_id: Optional[str] = None) -> List[Dict[str, str]]:
+        orig_session_id = session_id
+        session_id = f"{session_id}::{dataset_id}" if dataset_id else session_id
         """
         Get conversation history as list of dicts.
 
@@ -83,13 +86,13 @@ class ConversationMemory:
 
         # L2 fallback: reconstruct from PostgreSQL if cache is empty
         if not messages and chat_id:
-            messages = self._load_from_db(session_id, chat_id, last_n or self._max_messages)
+            messages = self._load_from_db(session_id, chat_id, last_n or self._max_messages, dataset_id)
 
         if last_n is not None:
             messages = messages[-last_n:]
         return [{'role': m.role, 'content': m.content} for m in messages]
 
-    def _load_from_db(self, session_id: str, chat_id: str, last_n: int) -> List[ConvMessage]:
+    def _load_from_db(self, session_id: str, chat_id: str, last_n: int, dataset_id: Optional[str] = None) -> List[ConvMessage]:
         """Load messages from PostgreSQL and populate L1 cache."""
         try:
             from config import Config
@@ -112,7 +115,7 @@ class ConversationMemory:
                     timestamp=m.created_at.isoformat() if m.created_at else None,
                 )
                 for m in db_msgs
-                if m.role in ('user', 'assistant')
+                if m.role in ('user', 'assistant') and (not dataset_id or (m.metadata_json or {}).get('dataset_id') in (None, dataset_id))
             ]
 
             # Populate L1 cache with DB data (thread-safe write)

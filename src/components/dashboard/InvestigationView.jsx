@@ -673,6 +673,16 @@ export default function InvestigationView({ datasetId }) {
     });
   }, [datasetId, connectToStream]);
 
+  // A transformation-triggered investigation starts in the backend after the
+  // apply/undo request. Reconnect this mounted view to its fresh SSE stream.
+  useEffect(() => {
+    const refresh = ({ datasetId: changedDatasetId } = {}) => {
+      if (changedDatasetId === datasetId) connectToStream();
+    };
+    const unsubscribe = EventBus.on(Events.INVESTIGATION_REFRESHED, refresh);
+    return unsubscribe;
+  }, [datasetId, connectToStream]);
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   if (!datasetId) return null;

@@ -40,8 +40,11 @@ class QueryNormalizer:
         # 1. Clean input
         # Lowercase
         cleaned = raw_query.lower()
-        # Remove punctuation
-        cleaned = cleaned.translate(str.maketrans('', '', string.punctuation))
+        # Separate hyphenated/dashed/slashed compound terms with spaces
+        cleaned = re.sub(r'[-/–—]', ' ', cleaned)
+        # Remove sentence punctuation while preserving relational operators and identifier underscores
+        punct_to_strip = ''.join([c for c in string.punctuation if c not in ('_', '=', '>', '<', '!')])
+        cleaned = cleaned.translate(str.maketrans('', '', punct_to_strip))
         # Remove extra spaces
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         

@@ -1,22 +1,28 @@
-"""Model Selection Engine.
+"""
+Model Selection Engine with Role-Aware Isolation and Global Quarantine.
 
-Provides two selection modes:
-  1. select() / select_fallback() — excludes by PROVIDER name (legacy, used by generate_stream)
-  2. select_by_model_fallback()  — excludes by MODEL ID (used by FallbackEngine)
-     This enables within-Groq model fallback:
-       openai/gpt-oss-20b → Qwen/Qwen3.6-27B-A3B-Instruct → openai/gpt-oss-120b
+Enforces:
+1. Hard role constraints:
+   - Router role (classification, router): Mistral Small 4 -> Nvidia NIM direct
+   - Analysis role: OpenRouter Gemma -> OpenRouter Nemotron -> Gemini
+   - Transformation role (transformation_planning, transformation): Gemini pool only (no cross-role fallback)
+   - Conversation role (chat, conversation, presentation, title): OpenRouter Gemma -> OpenRouter Nemotron -> Gemini
+2. Quarantine and circuit eligibility check for provider, credential slot, and model ID.
+3. Multi-credential quota awareness via CredentialScheduler.
 """
 import logging
 from typing import Optional, List
 
 from providers.model_registry import model_registry, ModelMetadata
-from providers.circuit_breaker import circuit_breaker
+from providers.quarantine import quarantine_manager
+from providers.registry import provider_registry
+from providers.scheduler import credential_scheduler
 
 logger = logging.getLogger(__name__)
 
 
 class ModelSelector:
-    """Selects the best available model for a task."""
+    """Selects the best available model for a task with hard role constraints."""
 
     def select(
         self,
@@ -25,15 +31,26 @@ class ModelSelector:
         exclude_providers: Optional[List[str]] = None,
     ) -> Optional[ModelMetadata]:
         """Select best model for task, excluding given providers (legacy API)."""
-        exclude_providers = exclude_providers or []
+        exclude_providers = [p.lower() for p in (exclude_providers or [])]
         models = model_registry.get_models_for_task(task, require_json)
 
         valid_models = []
         for model in models:
-            if model.provider in exclude_providers:
+            if model.provider.lower() in exclude_providers:
                 continue
-            if not circuit_breaker.can_call(model.provider):
-                continue
+            # Check if any slot is eligible in scheduler
+            slots = credential_scheduler.get_slots(model.provider)
+            if slots:
+                has_eligible_slot = any(
+                    quarantine_manager.is_eligible(model.provider, api_key=s.api_key, model_id=model.model_id)
+                    for s in slots
+                )
+                if not has_eligible_slot:
+                    continue
+            else:
+                api_key = provider_registry.get_api_key(model.provider)
+                if not quarantine_manager.is_eligible(model.provider, api_key=api_key, model_id=model.model_id):
+                    continue
             valid_models.append(model)
 
         if not valid_models:
@@ -58,34 +75,39 @@ class ModelSelector:
         failed_model_ids: List[str],
     ) -> Optional[ModelMetadata]:
         """
-        Select the best model for a task, excluding specific model IDs.
-
-        This is the correct API for the FallbackEngine — it excludes
-        individual models (not whole providers), enabling within-Groq
-        model-level fallback:
-
-          openai/gpt-oss-20b     (fails)
-              → Qwen/Qwen3.6-27B-A3B-Instruct  (same groq provider)
-              → openai/gpt-oss-120b              (same groq provider)
-              → deepseek/deepseek-chat-v3         (openrouter)
+        Select the best model for a task, excluding specific failed model IDs.
+        Enforces role isolation, quarantine state, and quota scopes.
         """
-        models = model_registry.get_models_for_task(task, require_json)
+        task_clean = (task or "fallback").lower().strip()
+        models = model_registry.get_models_for_task(task_clean, require_json)
 
         valid_models = []
         for model in models:
-            if model.model_id in failed_model_ids:
+            if model.model_id in failed_model_ids or model.model_name in failed_model_ids:
                 continue
-            if model.model_name in failed_model_ids:
-                continue
-            # Circuit breaker: if the provider has been circuit-broken,
-            # skip it UNLESS we have another model on the same provider
-            # that wasn't individually failed (circuit break is per-provider).
-            if not circuit_breaker.can_call(model.provider):
-                logger.debug(
-                    "[ModelSelector] Circuit OPEN for provider=%s — skipping model=%s",
-                    model.provider, model.model_id
+
+            # Verify credential eligibility via CredentialScheduler / QuarantineManager
+            slots = credential_scheduler.get_slots(model.provider)
+            if slots:
+                has_eligible_slot = any(
+                    quarantine_manager.is_eligible(model.provider, api_key=s.api_key, model_id=model.model_id)
+                    for s in slots
                 )
-                continue
+                if not has_eligible_slot:
+                    logger.debug(
+                        "[ModelSelector] All slots quarantined for provider=%s model=%s — skipping",
+                        model.provider, model.model_id
+                    )
+                    continue
+            else:
+                api_key = provider_registry.get_api_key(model.provider)
+                if not quarantine_manager.is_eligible(model.provider, api_key=api_key, model_id=model.model_id):
+                    logger.debug(
+                        "[ModelSelector] Quarantine ACTIVE for provider=%s model=%s — skipping",
+                        model.provider, model.model_id
+                    )
+                    continue
+
             valid_models.append(model)
 
         if not valid_models:
@@ -95,7 +117,7 @@ class ModelSelector:
             )
             return None
 
-        selected = self._score_and_pick(valid_models, task)
+        selected = self._score_and_pick(valid_models, task_clean)
         if selected:
             logger.info(
                 "[ModelSelector] Selected: model=%s provider=%s priority=%d task=%s",
@@ -105,20 +127,25 @@ class ModelSelector:
 
     @staticmethod
     def _score_and_pick(models: List[ModelMetadata], task: str) -> Optional[ModelMetadata]:
-        """Score models by: priority (lower is better), task affinity, reliability, cost."""
+        """Score models by effective priority, task affinity, reliability, and cost."""
         if not models:
             return None
 
+        task_lower = (task or "").lower().strip()
         scored = []
         for model in models:
-            affinity = model.task_affinities.get(task, 0.5)
+            affinity = model.task_affinities.get(task_lower, 0.5)
             cost_factor = 1.0 / (1.0 + getattr(model, 'estimated_cost_per_1k', 0.0))
             priority = getattr(model, 'priority', 5)
+
+            # For transformation tasks, Gemini has dedicated Priority 0
+            if task_lower in ("transformation_planning", "transformation") and model.provider == "gemini":
+                priority = 0
+
             reliability = getattr(model, 'reliability_score', 1.0)
 
-            # Priority is primary sort key (lower = better → negate for max sort)
-            # Affinity is secondary
-            score = (10 - priority) * affinity * reliability * cost_factor
+            # Priority is primary sort key (lower priority value = better score)
+            score = (100 - priority * 10) * affinity * reliability * cost_factor
             scored.append((score, model))
 
         scored.sort(key=lambda x: x[0], reverse=True)

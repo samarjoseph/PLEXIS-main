@@ -65,14 +65,7 @@ class DatasetService:
         file_hash = hashlib.sha256(file_bytes).hexdigest()
         logger.debug("[DATASET_SVC] Hash computed: %s for %s", file_hash[:12] + "...", filename)
 
-        # User-scoped deduplication
-        existing = dataset_repository.get_by_hash(db, file_hash, user_id)
-        if existing:
-            logger.info(
-                "[DATASET_SVC] Dedup hit: user=%s file=%s → dataset_id=%s",
-                user_id, filename, existing.id,
-            )
-            return existing
+        # User-scoped deduplication removed. Every explicit upload creates a new dataset.
 
         # Create new dataset record + BYTEA
         dataset = dataset_repository.create_dataset(
@@ -89,7 +82,7 @@ class DatasetService:
         self,
         db: Session,
         dataset_id: UUID,
-        user_id: UUID,
+        user_id: Optional[UUID] = None,
     ):
         """
         Restore a DataFrame from PostgreSQL BYTEA storage.
@@ -107,18 +100,37 @@ class DatasetService:
         """
         import pandas as pd
 
-        dataset = dataset_repository.get_by_id(db, dataset_id, user_id)
+        if user_id is not None:
+            dataset = dataset_repository.get_by_id(db, dataset_id, user_id)
+        else:
+            dataset = dataset_repository.get_by_id_unsafe(db, dataset_id)
+            
         if not dataset:
             logger.warning("[DATASET_SVC] Dataset %s not found for user %s", dataset_id, user_id)
             return None, None
 
-        raw_bytes = dataset_repository.get_file_bytes(db, dataset_id, user_id)
+        # A logical dataset keeps its original upload row, while each applied
+        # transformation is stored as a separate DatasetVersion snapshot.
+        # Always restore the latest snapshot on a cold cache.
+        from db.repositories.transformation_repository import transformation_repository
+        latest = transformation_repository.get_latest_version(db, dataset_id)
+        content_dataset_id = latest.version_dataset_id if latest else dataset_id
+        if latest:
+            if user_id is not None:
+                content_dataset = dataset_repository.get_by_id(db, content_dataset_id, user_id)
+            else:
+                content_dataset = dataset_repository.get_by_id_unsafe(db, content_dataset_id)
+        else:
+            content_dataset = dataset
+        
+        raw_bytes = dataset_repository.get_file_bytes(db, content_dataset_id, user_id)
         if raw_bytes is None:
             logger.error("[DATASET_SVC] No file bytes for dataset %s", dataset_id)
             return dataset, None
 
         try:
-            df = self._bytes_to_dataframe(raw_bytes, dataset.original_filename)
+            filename = content_dataset.original_filename if content_dataset else dataset.original_filename
+            df = self._bytes_to_dataframe(raw_bytes, filename)
         except Exception as e:
             logger.error("[DATASET_SVC] Failed to reconstruct DataFrame for %s: %s", dataset_id, e)
             return dataset, None
@@ -127,8 +139,8 @@ class DatasetService:
         self._register_in_cache(dataset, df)
 
         logger.info(
-            "[DATASET_SVC] Restored dataset %s from DB (%d rows × %d cols)",
-            dataset_id, len(df), len(df.columns),
+            "[DATASET_SVC] Restored dataset %s from DB version=%s (%d rows × %d cols)",
+            dataset_id, latest.version_number if latest else 0, len(df), len(df.columns),
         )
         return dataset, df
 
@@ -136,7 +148,7 @@ class DatasetService:
         self,
         db: Session,
         dataset_id: UUID,
-        user_id: UUID,
+        user_id: Optional[UUID] = None,
     ) -> Tuple[Optional[Dataset], object]:
         """
         Get a Dataset and its DataFrame.
@@ -204,6 +216,10 @@ class DatasetService:
     def _bytes_to_dataframe(self, raw_bytes: bytes, filename: str):
         """Convert raw file bytes to a pandas DataFrame."""
         import pandas as pd
+
+        if filename.lower().endswith('.plexis.json'):
+            from datasets.version_codec import deserialize_dataframe
+            return deserialize_dataframe(raw_bytes)
 
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "csv"
         buf = io.BytesIO(raw_bytes)

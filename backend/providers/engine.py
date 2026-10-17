@@ -27,32 +27,60 @@ class ProviderEngine:
             return
         self._initialized = True
 
+        try:
+            from providers.mock_provider import MockProvider
+            mock_provider = MockProvider(None)
+            provider_registry.register(mock_provider, "mock_key")
+            logger.info("ProviderEngine: registered provider=mock")
+        except Exception as e:
+            logger.error(f"Failed to load mock provider: {e}")
+
         from config import Config
 
         # Each provider is initialized independently.
         # A failure in one (e.g., SDK import error or missing API key) must NOT
         # prevent the others from loading. This is the provider isolation guarantee.
 
-        if Config.GEMINI_API_KEY:
+        if Config.GEMINI_API_KEYS:
             try:
                 from providers.gemini import GeminiProvider
-                gemini_provider = GeminiProvider(Config.GEMINI_API_KEY)
-                provider_registry.register(gemini_provider, Config.GEMINI_API_KEY)
-                logger.info("ProviderEngine: registered provider=gemini")
+                gemini_provider = GeminiProvider(Config.GEMINI_API_KEYS[0])
+                provider_registry.register(gemini_provider, Config.GEMINI_API_KEYS)
+                logger.info(f"ProviderEngine: registered provider=gemini with {len(Config.GEMINI_API_KEYS)} key slots")
             except Exception as e:
                 logger.warning(
                     f"ProviderEngine: skipping gemini provider — failed to register: {e}"
                 )
 
-        if Config.OPENROUTER_API_KEY:
+        if Config.OPENROUTER_API_KEYS:
             try:
                 from providers.openrouter import OpenRouterProvider
-                openrouter_provider = OpenRouterProvider(Config.OPENROUTER_API_KEY)
-                provider_registry.register(openrouter_provider, Config.OPENROUTER_API_KEY)
-                logger.info("ProviderEngine: registered provider=openrouter")
+                openrouter_provider = OpenRouterProvider(Config.OPENROUTER_API_KEYS[0])
+                provider_registry.register(openrouter_provider, Config.OPENROUTER_API_KEYS)
+                logger.info(f"ProviderEngine: registered provider=openrouter with {len(Config.OPENROUTER_API_KEYS)} key slots")
             except Exception as e:
                 logger.warning(
                     f"ProviderEngine: skipping openrouter provider — failed to register: {e}"
+                )
+
+        if Config.NVIDIA_API_KEYS:
+            try:
+                from providers.nvidia import NvidiaProvider
+                nvidia_provider = NvidiaProvider(Config.NVIDIA_API_KEYS[0])
+                provider_registry.register(nvidia_provider, Config.NVIDIA_API_KEYS)
+                logger.info(f"ProviderEngine: registered provider=nvidia with {len(Config.NVIDIA_API_KEYS)} key slots")
+            except Exception as e:
+                logger.warning(f"ProviderEngine: skipping nvidia provider — failed to register: {e}")
+
+        if Config.MISTRAL_API_KEY:
+            try:
+                from providers.mistral import MistralProvider
+                mistral_provider = MistralProvider(Config.MISTRAL_API_KEY)
+                provider_registry.register(mistral_provider, Config.MISTRAL_API_KEY)
+                logger.info("ProviderEngine: registered provider=mistral")
+            except Exception as e:
+                logger.warning(
+                    f"ProviderEngine: skipping mistral provider — failed to register: {e}"
                 )
 
         if Config.GROQ_API_KEY:
@@ -66,17 +94,6 @@ class ProviderEngine:
                     f"ProviderEngine: skipping groq provider — failed to register: {e}"
                 )
 
-        if Config.MISTRAL_API_KEY:
-            try:
-                from providers.mistral import MistralProvider
-                mistral_provider = MistralProvider(Config.MISTRAL_API_KEY)
-                provider_registry.register(mistral_provider, Config.MISTRAL_API_KEY)
-                logger.info("ProviderEngine: registered provider=mistral")
-            except Exception as e:
-                logger.warning(
-                    f"ProviderEngine: skipping mistral provider — failed to register: {e}"
-                )
-
         available = provider_registry.get_available()
         logger.info(f"ProviderEngine: initialization complete. Available providers: {available}")
 
@@ -87,8 +104,6 @@ class ProviderEngine:
         response = fallback_engine.execute(request)
 
         if response.success:
-            health_monitor.record_success(response.provider)
-            circuit_breaker.record_success(response.provider)
             model_registry.update_latency(response.model, response.latency_ms)
             model_registry.update_reliability(response.model, True)
             from core.events import event_bus, ProviderCalledEvent
@@ -137,14 +152,27 @@ class ProviderEngine:
             f"model='{model_meta.model_name}'"
         )
 
+        from providers.scheduler import credential_scheduler
+        slot = credential_scheduler.select_and_reserve(model_meta.provider, model_id=model_meta.model_id)
+        api_key = slot.api_key if slot else provider_registry.get_api_key(model_meta.provider)
+
         try:
-            yield from provider_instance.generate_stream(request)
+            try:
+                yield from provider_instance.generate_stream(request, api_key=api_key)
+            except TypeError:
+                yield from provider_instance.generate_stream(request)
         except Exception as e:
             logger.error(f"generate_stream: provider '{model_meta.provider}' raised {e}")
             # Final fallback — non-streaming generate
-            response = provider_instance.generate(request)
+            try:
+                response = provider_instance.generate(request, api_key=api_key)
+            except TypeError:
+                response = provider_instance.generate(request)
             if response.success and response.text:
                 yield response.text
+        finally:
+            if slot:
+                credential_scheduler.release_reservation(slot)
 
     def generate_json(self, request: AIRequest) -> Dict[str, Any]:
         """Generate structured JSON utilizing provider fallbacks."""

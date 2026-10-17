@@ -81,6 +81,9 @@ def create_app() -> Flask:
         init_db(app)
         _verify_db_migration(app)
 
+    # Initialize LLM providers and multi-slot credential pools
+    from providers.engine import provider_engine
+
     app.register_blueprint(health_bp)
     app.register_blueprint(datasets_bp)
     app.register_blueprint(datasets_data_bp)
@@ -88,6 +91,13 @@ def create_app() -> Flask:
     app.register_blueprint(spreadsheet_bp)
     app.register_blueprint(analysis_bp)
     app.register_blueprint(early_access_bp)
+
+    # Register transformation API blueprint
+    try:
+        from api.transform import transform_bp
+        app.register_blueprint(transform_bp)
+    except ImportError as e:
+        logger.warning("[app] transform_bp not loaded: %s", e)
 
     # Register chats API blueprint
     try:

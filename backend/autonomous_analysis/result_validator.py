@@ -2,7 +2,7 @@ import re
 import math
 from typing import Dict, Any, List
 
-from autonomous_analysis.contracts import InvestigationResult, NumericalGrounding
+from autonomous_analysis.contracts import InvestigationResult, NumericalGrounding, StructuredFinding, StructuredEvidence
 
 class ResultValidator:
     def validate(self, result: InvestigationResult) -> InvestigationResult:
@@ -88,6 +88,43 @@ class ResultValidator:
                 # Assuming grounding has is_supported method as specified in prompt
                 if hasattr(grounding, 'is_supported') and not grounding.is_supported(num):
                     return False
+        return True
+
+    def validate_finding(self, finding: StructuredFinding, evidence: StructuredEvidence, result: InvestigationResult) -> bool:
+        """Strictly validates a structured finding against the allowed evidence boundary."""
+        if not evidence:
+            return False
+            
+        if evidence.dataset_id != result.evidence.dataset_id:
+            return False
+            
+        for ev_id in finding.evidence_ids:
+            if ev_id != evidence.evidence_id:
+                return False
+
+        allowed_cols = set(evidence.columns)
+        for c in finding.columns_referenced:
+            if c not in allowed_cols:
+                return False
+
+        allowed_cats = set(evidence.categories)
+        for cat in finding.categories_referenced:
+            if cat not in allowed_cats:
+                return False
+
+        allowed_nums = list(evidence.statistics.values()) + [v for v in evidence.values if isinstance(v, (int, float))]
+        def is_supported(claimed_value):
+            for val in allowed_nums:
+                if abs(val) > 0 and abs(claimed_value - val) / abs(val) <= 0.01:
+                    return True
+                if abs(val) == 0 and abs(claimed_value) < 0.001:
+                    return True
+            return False
+            
+        for num in finding.numbers_referenced:
+            if num > 0.1 and not is_supported(num):
+                return False
+
         return True
 
 result_validator = ResultValidator()

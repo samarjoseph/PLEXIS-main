@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Generator, Optional, Any
+from typing import Generator, Optional, Any, Dict
 
 @dataclass
 class ProviderResponse:
@@ -19,6 +19,9 @@ class ProviderResponse:
     success: bool = True
     error: Optional[str] = None
     raw_response: Optional[Any] = None
+    status_code: Optional[int] = None
+    retry_after: Optional[float] = None
+    headers: Optional[Dict[str, Any]] = None
 
 class BaseProvider(ABC):
     """Abstract base class for LLM providers."""

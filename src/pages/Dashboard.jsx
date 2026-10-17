@@ -314,9 +314,9 @@ function DashboardInner() {
   };
 
   // ── Send Message ───────────────────────────────────────────
-  const handleSend = async (retryText = null, retryFile = null, errorMsgIdToRemove = null, extraOptions = {}) => {
+  async function handleSend(retryText = null, retryFile = null, errorMsgIdToRemove = null, extraOptions = {}) {
     const isRetry = retryText !== null || retryFile !== null;
-    const runtimeText = isRetry ? retryText : inputText;
+    const runtimeText = extraOptions.message ?? (isRetry ? retryText : inputText);
     const runtimeFile = isRetry ? retryFile : stagedFile;
 
     if (!runtimeText?.trim() && !runtimeFile) return;
@@ -411,6 +411,13 @@ function DashboardInner() {
               setDataset(datasetId, streamingTargetIdRef.current);
               EventBus.emit(Events.DATASET_LOADED, { datasetId, filename: nextDatasetName });
               EvidenceRegistry.setCurrentFingerprint(datasetInfo.schema_fingerprint || datasetId);
+            }
+
+            // Auto-open Investigation workspace after upload
+            // ARCHITECTURE: Upload → Investigation tab opens with deterministic stats
+            if (datasetId && data?.trigger_investigation) {
+              EventBus.emit(Events.INVESTIGATION_REQUESTED, { datasetId });
+              setAnalyticsCollapsed(false);
             }
 
             setStreamingMessageId(null);
@@ -542,7 +549,24 @@ function DashboardInner() {
         result: apiResult?.result || null,
         // Inherit the spreadsheet card for follow-up explain messages
         ...(inheritedCard && { spreadsheetCard: inheritedCard }),
+        // Transformation plan — set by TransformEngine
+        ...(apiResult?.transform_plan && {
+          transformPlan: apiResult.transform_plan,
+          datasetId: currentConv.datasetId || '',
+        }),
+        ...(apiResult?.transformation_clarification && {
+          transformationClarification: apiResult.transformation_clarification,
+        }),
+        ...(apiResult?.transformation_update && {
+          transformationUpdate: apiResult.transformation_update,
+        }),
       };
+
+      // Open Investigation tab if backend flags it
+      if (apiResult?.trigger_investigation && currentConv.datasetId) {
+        EventBus.emit(Events.INVESTIGATION_REQUESTED, { datasetId: currentConv.datasetId });
+        setAnalyticsCollapsed(false);
+      }
 
       // Emit evidence event if present
       if (evidence) {
@@ -599,6 +623,92 @@ function DashboardInner() {
   const handleRetry = (msg) => {
     if (msg.retryPayload) handleSend(msg.retryPayload.text, msg.retryPayload.file, msg.id);
   };
+
+  // ── Transform Handlers ─────────────────────────────────────
+  const [isApplyingTransform, setIsApplyingTransform] = useState(false);
+
+  const handleApplyTransform = useCallback(async (planId, datasetId) => {
+    setIsApplyingTransform(true);
+    try {
+      const result = await PlexisAPI.applyTransformation(planId, datasetId);
+      const ts = Date.now();
+      if (result.error) {
+        const errText = result.conflict
+          ? '⚠️ The dataset changed after this plan was created. Please ask again to regenerate the plan.'
+          : `Transformation failed: ${result.error}`;
+        setConversations((prev) =>
+          updateConversation(prev, activeId, {
+            messages: [...(prev.find(c => c.id === activeId)?.messages ?? []),
+              { id: `tf-err-${ts}`, sender: 'ai', text: errText }],
+          })
+        );
+        return;
+      }
+      // Add TransformResultCard message
+      setConversations((prev) =>
+        updateConversation(prev, activeId, {
+          messages: [...(prev.find(c => c.id === activeId)?.messages ?? []),
+            {
+              id: `tf-result-${ts}`,
+              sender: 'ai',
+              transformResult: result,
+              datasetId,
+            }],
+        })
+      );
+      EventBus.emit(Events.TRANSFORM_APPLIED, { datasetId, result });
+      PlexisAPI.startInvestigation(datasetId, { refresh: true })
+        .then(() => EventBus.emit(Events.INVESTIGATION_REFRESHED, { datasetId }))
+        .catch((error) => console.warn('[investigation refresh after transform]', error));
+    } catch (e) {
+      console.error('[handleApplyTransform]', e);
+    } finally {
+      setIsApplyingTransform(false);
+    }
+  }, [activeId]);
+
+  const handleCancelTransform = useCallback(() => {
+    const ts = Date.now();
+    setConversations((prev) =>
+      updateConversation(prev, activeId, {
+        messages: [...(prev.find(c => c.id === activeId)?.messages ?? []),
+          { id: `tf-cancel-${ts}`, sender: 'ai', text: 'Transformation cancelled.' }],
+      })
+    );
+  }, [activeId]);
+
+  const handleUndoTransform = useCallback(async (datasetId) => {
+    try {
+      const result = await PlexisAPI.undoTransformation(datasetId);
+      const ts = Date.now();
+      setConversations((prev) =>
+        updateConversation(prev, activeId, {
+          messages: [...(prev.find(c => c.id === activeId)?.messages ?? []),
+            {
+              id: `tf-undo-${ts}`,
+              sender: 'ai',
+              text: result.success ? `↩️ ${result.message}` : `Undo failed: ${result.error}`,
+            }],
+        })
+      );
+      if (result.success) {
+        EventBus.emit(Events.TRANSFORM_UNDONE, { datasetId, result });
+        PlexisAPI.startInvestigation(datasetId, { refresh: true })
+          .then(() => EventBus.emit(Events.INVESTIGATION_REFRESHED, { datasetId }))
+          .catch((error) => console.warn('[investigation refresh after undo]', error));
+      }
+    } catch (e) {
+      console.error('[handleUndoTransform]', e);
+    }
+  }, [activeId]);
+
+  const handleExportDataset = useCallback(async (datasetId) => {
+    try {
+      await PlexisAPI.exportDataset(datasetId);
+    } catch (e) {
+      console.error('[handleExportDataset]', e);
+    }
+  }, []);
 
   // ── Keyboard Shortcuts ─────────────────────────────────────
   useKeyboardShortcuts([
@@ -675,6 +785,14 @@ function DashboardInner() {
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
           analyticsCollapsed={analyticsCollapsed}
           onToggleAnalytics={() => setAnalyticsCollapsed((v) => !v)}
+          onApplyTransform={handleApplyTransform}
+          onCancelTransform={handleCancelTransform}
+          onClarificationAction={(message, workspaceAction) =>
+            handleSend(null, null, null, { message, workspaceAction })
+          }
+          onUndoTransform={handleUndoTransform}
+          onExportDataset={handleExportDataset}
+          isApplyingTransform={isApplyingTransform}
         />
 
         {/* DatasetWorkspace panel — side-by-side mode */}
@@ -745,6 +863,7 @@ function DashboardInner() {
             onToggleCollapse={() => setAnalyticsCollapsed(!analyticsCollapsed)}
             datasetName={activeConversation?.activeDatasetName}
             datasetStats={activeConversation?.datasetStats}
+            activeDatasetId={activeConversation?.datasetId || null}
           />
         )}
       </AnimatePresence>

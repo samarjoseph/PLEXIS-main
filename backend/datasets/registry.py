@@ -52,11 +52,37 @@ class DatasetRegistry:
         return entry
      
     def get(self, dataset_id: str) -> Optional[DatasetEntry]:
-        return self._datasets.get(dataset_id)
+        entry = self._datasets.get(dataset_id)
+        if entry is not None:
+            return entry
+            
+        # L2 Auto-restore on cache miss
+        try:
+            from flask import has_request_context, request
+            import uuid
+            
+            user_id = None
+            if has_request_context():
+                from utils.response import _resolve_user
+                current_user, _ = _resolve_user(request)
+                if current_user:
+                    user_id = uuid.UUID(str(current_user.user_id))
+            
+            from db.session import get_db
+            from db.services.dataset_service import dataset_service
+            
+            db = get_db()
+            if db:
+                dataset, df = dataset_service.restore_dataset_df(db, uuid.UUID(dataset_id), user_id)
+                if dataset is not None and df is not None:
+                    return self._datasets.get(dataset_id)
+        except Exception as e:
+            logger.warning('Auto-restore failed for dataset %s: %s', dataset_id, e)
+            
+        return None
 
     def get_by_id(self, dataset_id: str) -> Optional[DatasetEntry]:
-        """Alias for get() — explicit naming for API clarity."""
-        return self._datasets.get(dataset_id)
+        return self.get(dataset_id)
         
     def get_by_filename(self, filename: str) -> Optional[DatasetEntry]:
         matches = [d for d in self._datasets.values() if d.filename == filename]

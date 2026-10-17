@@ -1,13 +1,12 @@
-"""Fallback and Execution Engine.
+"""
+Fallback and Execution Engine.
 
-Model-level fallback:
-  Tracks FAILED MODEL IDs (not provider names) so that within-Groq fallback works:
-    openai/gpt-oss-20b (fails)
-        -> Qwen/Qwen3.6-27B-A3B-Instruct (same groq provider, different model)
-        -> openai/gpt-oss-120b (same groq provider, high-reasoning)
-        -> openrouter (different provider, last resort)
-
-Provider circuit breakers are still used for health monitoring (transient errors).
+Model-level and provider-level fallback with Global Provider Quarantine and Circuit Breaker integration:
+  - Centralized quarantine and circuit state across all subsystems.
+  - Quota-scoped failure isolation with CredentialScheduler multi-key slot management.
+  - Bounded half-open probe execution.
+  - Category-specific cooldowns and Retry-After header adherence.
+  - Role-compatible failover with strict preservation of semantic intent.
 """
 import logging
 from typing import List, Optional
@@ -16,22 +15,21 @@ from providers.base import ProviderResponse
 from providers.domain.contracts import AIRequest
 from providers.selector import model_selector
 from providers.registry import provider_registry
-from providers.health import health_monitor
-from providers.circuit_breaker import circuit_breaker
-from providers.retry import retry_engine
+from providers.quarantine import quarantine_manager
+from providers.scheduler import credential_scheduler
 from core.events import event_bus, ProviderFailedEvent, ProviderSwitchedEvent
 
 logger = logging.getLogger(__name__)
 
 
 class FallbackEngine:
-    """Engine to orchestrate model-level execution with fallbacks."""
+    """Engine to orchestrate model-level and provider-level execution with fallbacks and global quarantine."""
 
     def execute(self, request: AIRequest) -> ProviderResponse:
-        """Execute prompt with model-level fallbacks."""
-        failed_model_ids: List[str] = []   # Track model IDs, not provider names
+        """Execute request with model-level fallbacks, multi-slot rotation, and global quarantine."""
+        failed_model_ids: List[str] = []
         attempts = 0
-        max_attempts = 5  # Enough to cover all 3 Groq tiers + 2 OpenRouter
+        max_attempts = 8
 
         while attempts < max_attempts:
             model_meta = model_selector.select_by_model_fallback(
@@ -40,12 +38,15 @@ class FallbackEngine:
                 failed_model_ids=failed_model_ids,
             )
             if not model_meta:
+                logger.warning("[FallbackEngine] No eligible models available (all models failed or quarantined).")
+                quarantine_manager._metrics["all_providers_unavailable"] += 1
                 return ProviderResponse(
                     text='',
                     model='unknown',
                     provider='unknown',
                     success=False,
-                    error='No available models or providers.'
+                    error='All available providers are quarantined or exhausted.',
+                    raw_response={'error_type': 'all_providers_unavailable', 'retryable': True}
                 )
 
             provider_name = model_meta.provider
@@ -60,112 +61,134 @@ class FallbackEngine:
                 failed_model_ids.append(model_id)
                 continue
 
-            attempts += 1
+            # Select and reserve a credential slot via CredentialScheduler
+            slot = credential_scheduler.select_and_reserve(provider_name, model_id=model_id)
+            api_key = slot.api_key if slot else provider_registry.get_api_key(provider_name)
 
-            logger.info(
-                "[FallbackEngine] Attempt %d: model=%s provider=%s",
-                attempts, model_id, provider_name
-            )
-
-            # Use circuit breaker only for transient failure history
-            if not circuit_breaker.can_call(provider_name):
+            # Check quarantine eligibility
+            if not quarantine_manager.is_eligible(provider_name, api_key=api_key, model_id=model_id):
+                if slot:
+                    credential_scheduler.release_reservation(slot)
                 logger.warning(
-                    "[FallbackEngine] Circuit breaker OPEN for provider=%s — "
-                    "skipping model %s", provider_name, model_id
+                    "[FallbackEngine] Scope quarantined for provider=%s model=%s — skipping",
+                    provider_name, model_id
                 )
                 failed_model_ids.append(model_id)
                 continue
 
-            def call_provider():
-                return provider_instance.generate(request)
-
-            try:
-                response = retry_engine.retry(
-                    call_provider,
-                    max_retries=1,    # Only 1 retry for transient errors; permanent = 0
-                    base_delay=0.5,
-                    provider_name=provider_name,
+            # Concurrency-safe half-open probe check
+            if not quarantine_manager.acquire_probe_slot(provider_name, api_key=api_key, model_id=model_id):
+                if slot:
+                    credential_scheduler.release_reservation(slot)
+                logger.warning(
+                    "[FallbackEngine] Probe already in flight for provider=%s model=%s — skipping to avoid probe storm",
+                    provider_name, model_id
                 )
+                failed_model_ids.append(model_id)
+                continue
+
+            attempts += 1
+            slot_id_str = slot.slot_id if slot else "default"
+            logger.info(
+                "[FallbackEngine] Attempt %d: model=%s provider=%s slot=%s",
+                attempts, model_id, provider_name, slot_id_str
+            )
+
+            # Call provider
+            try:
+                # Pass api_key to provider adapter if supported
+                try:
+                    response = provider_instance.generate(request, api_key=api_key)
+                except TypeError:
+                    # Fallback for adapters with older signatures
+                    response = provider_instance.generate(request)
             except Exception as exc:
+                if slot:
+                    credential_scheduler.release_reservation(slot)
                 logger.error(
                     "[FallbackEngine] Provider '%s' raised exception: %s",
                     provider_name, exc
                 )
+                quarantine_manager.record_failure(
+                    provider=provider_name,
+                    error=exc,
+                    api_key=api_key,
+                    model_id=model_id,
+                )
+                event_bus.publish(ProviderFailedEvent(
+                    provider=provider_name,
+                    error=str(exc)
+                ))
                 failed_model_ids.append(model_id)
-                health_monitor.record_failure(provider_name)
-                circuit_breaker.record_failure(provider_name)
                 continue
 
+            # Release reserved slot capacity
+            if slot:
+                credential_scheduler.release_reservation(slot)
+
+            # Successful response
             if response.success:
-                health_monitor.record_success(provider_name)
-                circuit_breaker.record_success(provider_name)
+                quarantine_manager.record_success(
+                    provider=provider_name,
+                    api_key=api_key,
+                    model_id=model_id,
+                )
                 logger.info(
-                    "[FallbackEngine] Success: model=%s provider=%s",
-                    response.model, response.provider
+                    "[FallbackEngine] Success: model=%s provider=%s slot=%s",
+                    response.model, response.provider, slot_id_str
                 )
                 return response
 
-            # ── Permanent error fast-fail ───────────────────────────────────────
-            # 404/422 = model not found; 401/403 = auth failure (never retry).
-            # These are configuration failures, not transient outages.
-            error_str = str(response.error or "").lower()
-            is_permanent = (
-                "http 404" in error_str
-                or "http 422" in error_str
-                or "http 401" in error_str
-                or "http 403" in error_str
-                or "unauthorized" in error_str
-                or "forbidden" in error_str
-                or "model not available" in error_str
-                or "does not exist" in error_str
-                or "model_not_found" in error_str
-                or "not available on groq" in error_str
-            )
-            if is_permanent:
-                logger.warning(
-                    "[FallbackEngine] PERMANENT error for model=%s — "
-                    "skipping to next model. error=%s",
-                    model_id, response.error
-                )
-                failed_model_ids.append(model_id)
-                event_bus.publish(ProviderFailedEvent(
-                    provider=provider_name,
-                    error=f"[PERMANENT] {response.error}"
-                ))
-                continue
-
-            # ── Transient error (429, 5xx, timeout) ───────────────────────────────
+            # Qualifying failure returned (HTTP 429, 5xx, auth, config, etc.)
             logger.warning(
-                "[FallbackEngine] Transient error for model=%s provider=%s: %s",
-                model_id, provider_name, response.error
+                "[FallbackEngine] Provider error for model=%s provider=%s slot=%s: %s",
+                model_id, provider_name, slot_id_str, response.error
             )
-            health_monitor.record_failure(provider_name)
-            circuit_breaker.record_failure(provider_name)
+
+            quarantine_manager.record_failure(
+                provider=provider_name,
+                error=response.error,
+                api_key=api_key,
+                model_id=model_id,
+                status_code=getattr(response, 'status_code', None),
+                headers=getattr(response, 'headers', None),
+                raw_response=getattr(response, 'raw_response', None),
+            )
+
             event_bus.publish(ProviderFailedEvent(
                 provider=provider_name,
                 error=str(response.error)
             ))
-            failed_model_ids.append(model_id)
 
-            # Emit provider-switched event
+            # If other slots exist for this provider that might have independent quota,
+            # don't immediately ban the model ID unless all slots are exhausted
+            remaining_slots = [
+                s for s in credential_scheduler.get_slots(provider_name)
+                if quarantine_manager.is_eligible(provider_name, api_key=s.api_key, model_id=model_id)
+            ]
+            if not remaining_slots:
+                failed_model_ids.append(model_id)
+
+            # Emit provider-switched event if next model is on a different provider
             next_model = model_selector.select_by_model_fallback(
                 task=request.task or "fallback",
                 require_json=request.json_mode,
                 failed_model_ids=failed_model_ids,
             )
-            if next_model:
+            if next_model and next_model.provider != provider_name:
                 event_bus.publish(ProviderSwitchedEvent(
                     from_provider=provider_name,
                     to_provider=next_model.provider
                 ))
 
+        quarantine_manager._metrics["all_providers_unavailable"] += 1
         return ProviderResponse(
             text='',
             model='unknown',
             provider='unknown',
             success=False,
-            error='All fallback attempts exhausted.',
-            raw_response={'error_type': 'provider_exhausted', 'retryable': True},
+            error='All fallback attempts exhausted. Providers unavailable or quarantined.',
+            raw_response={'error_type': 'all_providers_unavailable', 'retryable': True},
         )
 
 

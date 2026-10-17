@@ -185,6 +185,36 @@ class NumericalGrounding:
 
 
 @dataclass
+class StructuredEvidence:
+    evidence_id: str
+    dataset_id: str
+    dataset_fingerprint: str
+    evidence_type: str
+    columns: List[str] = field(default_factory=list)
+    categories: List[str] = field(default_factory=list)
+    statistics: Dict[str, float] = field(default_factory=dict)
+    values: List[Any] = field(default_factory=list)
+    method: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class StructuredFinding:
+    finding_id: str
+    finding_type: str
+    prose: str
+    evidence_ids: List[str] = field(default_factory=list)
+    columns_referenced: List[str] = field(default_factory=list)
+    categories_referenced: List[str] = field(default_factory=list)
+    numbers_referenced: List[float] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class InvestigationResult:
     candidate_id: str
     analysis_type: AnalysisType
@@ -193,16 +223,20 @@ class InvestigationResult:
     result_data: Dict[str, Any] = field(default_factory=dict)
     evidence: Optional[EvidenceReference] = None
     grounding: Optional[NumericalGrounding] = None
+    structured_evidence: Optional[StructuredEvidence] = None
     error: Optional[str] = None
     execution_time_ms: int = 0
     interpretation: str = ""
     interpretation_flagged: bool = False
+    verified_findings: List[StructuredFinding] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["analysis_type"] = self.analysis_type.value
         d["evidence"] = self.evidence.to_dict() if self.evidence else None
         d["grounding"] = self.grounding.to_dict() if self.grounding else None
+        d["structured_evidence"] = self.structured_evidence.to_dict() if self.structured_evidence else None
+        d["verified_findings"] = [f.to_dict() for f in self.verified_findings]
         return d
 
 

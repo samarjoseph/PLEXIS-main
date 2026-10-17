@@ -93,11 +93,22 @@ export function WorkspaceProvider({ children }) {
       dispatch({ type: WorkspaceActions.CLOSE });
     });
 
+    const refreshMetadataAfterTransform = ({ datasetId } = {}) => {
+      const current = stateRef.current;
+      if (current.isOpen && current.datasetId && current.datasetId === datasetId) {
+        dispatch({ type: WorkspaceActions.SET_LOADING, isLoading: true });
+      }
+    };
+    const unsubTransformApplied = EventBus.on(Events.TRANSFORM_APPLIED, refreshMetadataAfterTransform);
+    const unsubTransformUndone = EventBus.on(Events.TRANSFORM_UNDONE, refreshMetadataAfterTransform);
+
     return () => {
       unsubEvidenceSelected();
       unsubEvidenceCleared();
       unsubOpen();
       unsubClose();
+      unsubTransformApplied();
+      unsubTransformUndone();
     };
   }, []);
 
