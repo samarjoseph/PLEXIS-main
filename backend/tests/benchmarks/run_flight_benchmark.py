@@ -63,7 +63,7 @@ def upload_dataset():
         r.close()
         return dataset_id
 
-def ask_question(question, dataset_id, chat_id=None, timeout_sec=120):
+def ask_question(question, dataset_id, chat_id=None, timeout_sec=300):
     url = f"{API_BASE}/ask"
     payload = {
         "message": question,

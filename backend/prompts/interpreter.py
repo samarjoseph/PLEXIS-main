@@ -76,7 +76,7 @@ def build_interpreter_prompt(
     if dataset_loaded and columns:
         col_lines = []
         for col in columns[:30]:  # Limit to 30 columns in prompt
-            label = col.get("label", "")
+            label = col.get("name") or col.get("label", "")
             ctype = col.get("type", "unknown")
             samples = col.get("samples", [])
             sample_str = f" (e.g. {', '.join(str(s) for s in samples[:2])})" if samples else ""
@@ -174,9 +174,9 @@ OPERATION SCHEMA (use when intent=DATA_OPERATION or intent=TRANSFORM):
     {"type": "MISSING_COUNT_COLUMN", "column": "column_name"}
     {"type": "COLUMN_WITH_MOST_MISSING_VALUES"}
     {"type": "COLUMNS_WITHOUT_MISSING_VALUES"}
-    {"type": "GROUP_MEAN", "column": "group_col", "value_column": "value_col"}
-    {"type": "GROUP_SUM", "column": "group_col", "value_column": "value_col"}
-    {"type": "GROUP_COUNT", "column": "group_col"}
+    {"type": "GROUP_MEAN", "column": "group_col", "value_column": "value_col", "top_n": 10, "order": "desc"}
+    {"type": "GROUP_SUM", "column": "group_col", "value_column": "value_col", "top_n": 10, "order": "desc"}
+    {"type": "GROUP_COUNT", "column": "group_col", "top_n": 10, "order": "desc"}
     {"type": "CORRELATION", "column": "col1", "columns": ["col2"]}
     {"type": "QUANTILES", "column": "column_name", "quantiles": [0.25, 0.5, 0.75]}
     {"type": "HYPOTHETICAL", "column": "column_name", "action": "fill_missing", "fill_value": 5.0, "metric": "mean"}
@@ -201,6 +201,11 @@ OPERATION SCHEMA (use when intent=DATA_OPERATION or intent=TRANSFORM):
     {"type": "SORT_ROWS", "column": "column_name", "ascending": false}
     {"type": "FILTER_ROWS", "column": "score", "operator": ">", "value": 30, "action": "KEEP"}
     {"type": "FILTER_ROWS", "column": "score", "operator": "<", "value": 18, "action": "REMOVE"}
+    {"type": "CLIP", "column": "column_name", "max": 60}
+    {"type": "CLIP", "column": "column_name", "min": 10}
+    {"type": "UPDATE_EXTREMUM", "column": "column_name", "extremum": "max", "new_value": 60}
+    {"type": "UPDATE_EXTREMUM", "column": "column_name", "extremum": "min", "new_value": 10}
+    {"type": "EXTREME_VALUE_AMBIGUITY", "column": "column_name", "extremum": "max", "target_value": 60}
 
   IMPORTANT KEYS:
     - FILL_MISSING uses "value" (not "fill_value"): number, or "mean"/"median"/"mode"/"ffill"/"bfill"
@@ -209,12 +214,44 @@ OPERATION SCHEMA (use when intent=DATA_OPERATION or intent=TRANSFORM):
     - FILTER_ROWS uses "action": "KEEP" or "REMOVE"
     - DROP_COLUMN uses "column" (singular string, not "columns")
     - EXPLICIT QUOTES: If the user wraps a value in quotes (like 'none' or "false"), you MUST preserve it as a string exactly as written. DO NOT evaluate it to a JSON null or boolean.
+    - NEVER translate comparative words ("highest", "lowest", "maximum", "minimum", "max", "min") into literal string values in REPLACE_VALUES unless the user explicitly requested literal text replacement (e.g. 'replace the word "max" with...').
+    - If the user asks "change the highest X to Y" or "change the lowest X to Y", this is ambiguous between capping and modifying only the maximal observation(s). Use EXTREME_VALUE_AMBIGUITY so the user is prompted to clarify.
+    - RANKING ENTITY VS METRIC RESOLUTION:
+      * When user asks for top/bottom N of an entity/category with an EXPLICIT aggregation:
+        - "average", "mean", "avg" -> GROUP_MEAN with {"type": "GROUP_MEAN", "column": "<entity_col>", "value_column": "<metric_col>", "top_n": N, "order": "desc"}
+        - "maximum", "max", "highest single" -> GROUP_MAX with {"type": "GROUP_MAX", "column": "<entity_col>", "value_column": "<metric_col>", "top_n": N, "order": "desc"}
+        - "minimum", "min", "lowest single" -> GROUP_MIN with {"type": "GROUP_MIN", "column": "<entity_col>", "value_column": "<metric_col>", "top_n": N, "order": "asc"}
+        - "median" -> GROUP_MEDIAN with {"type": "GROUP_MEDIAN", "column": "<entity_col>", "value_column": "<metric_col>", "top_n": N, "order": "desc"}
+        - "total", "sum", "sales", "revenue", "profit" -> GROUP_SUM with {"type": "GROUP_SUM", "column": "<entity_col>", "value_column": "<metric_col>", "top_n": N, "order": "desc"}
+        - "count", "frequency", "most frequent" -> GROUP_COUNT with {"type": "GROUP_COUNT", "column": "<entity_col>", "top_n": N, "order": "desc"}
+        - "delayed flights", "count of positive delay" -> GROUP_COUNT_FILTERED with {"type": "GROUP_COUNT_FILTERED", "column": "<entity_col>", "filter_column": "<metric_col>", "filter_op": ">", "filter_value": 0, "top_n": N, "order": "desc"}
+      * When user asks for top/bottom N of an entity/category by a metric WITHOUT specifying an aggregation (e.g. "top 10 most delayed airlines", "least delayed airlines"):
+        DO NOT SILENTLY DEFAULT TO GROUP_MEAN OR GUESS AN AGGREGATION!
+        This request is ambiguous between average delay, count of delayed flights, and maximum delay.
+      * When user asks for top/bottom N individual rows, records, or metric observations (e.g. "top 10 most delayed flights", "top 10 departure delays", "highest 5 scores"):
+        Use TOP_N or BOTTOM_N:
+        {"type": "TOP_N", "column": "<metric_col>", "n": N, "order": "desc"}
+      * When user asks for a single extreme value (e.g. "highest departure delay", "maximum price", "lowest score"):
+        Use MAX or MIN:
+        {"type": "MAX", "column": "<metric_col>"}
 """
 
     examples = """
 EXAMPLES:
 
   READ-ONLY (DATA_OPERATION):
+  Q: "give me top 10 airlines by average departure delay"
+  -> {"intent": "DATA_OPERATION", "operations": [{"type": "GROUP_MEAN", "column": "Airline", "value_column": "Departure_Delay", "top_n": 10, "order": "desc"}], "confidence": 0.98, "reason": "Rank airlines by average departure delay descending, top 10"}
+
+  Q: "which are the top 5 cities with highest sales?"
+  -> {"intent": "DATA_OPERATION", "operations": [{"type": "GROUP_SUM", "column": "city", "value_column": "sales", "top_n": 5, "order": "desc"}], "confidence": 0.98, "reason": "Rank cities by total sales descending, top 5"}
+
+  Q: "give me top 10 most delayed flights" / "top 10 highest delays"
+  -> {"intent": "DATA_OPERATION", "operations": [{"type": "TOP_N", "column": "Departure_Delay", "n": 10, "order": "desc"}], "confidence": 0.98, "reason": "Top 10 individual flight delay observations"}
+
+  Q: "what is the highest departure delay?" / "maximum departure delay"
+  -> {"intent": "DATA_OPERATION", "operations": [{"type": "MAX", "column": "Departure_Delay"}], "confidence": 0.98, "reason": "Maximum scalar value of Departure_Delay"}
+
   Q: "what is the lowest score?"
   â†’ {"intent": "DATA_OPERATION", "operations": [{"type": "MIN", "column": "score"}], "confidence": 0.97, "reason": "Lowest = minimum; score column is numeric"}
 
@@ -398,14 +435,22 @@ EXAMPLES:
   â†’ {"intent": "TRANSFORM", "operations": [{"type": "FILTER_ROWS", "column": "score", "operator": "<", "value": 18, "action": "REMOVE"}], "confidence": 0.97, "reason": "Remove rows matching condition"}
 
   Q: "delete rows where region is Central"
-  â†’ {"intent": "TRANSFORM", "operations": [{"type": "FILTER_ROWS", "column": "region", "operator": "==", "value": "Central", "action": "REMOVE"}], "confidence": 0.96, "reason": "Delete specific rows"}
+  → {"intent": "TRANSFORM", "operations": [{"type": "FILTER_ROWS", "column": "region", "operator": "==", "value": "Central", "action": "REMOVE"}], "confidence": 0.96, "reason": "Delete specific rows"}
 
-        "  MULTI-OPERATION EXAMPLES:\n"
-        "  Q: \"What is the average age and how many missing values are there in total?\"\n"
-        "  -> {\"intent\": \"DATA_OPERATION\", \"operations\": [{\"type\": \"AGGREGATE\", \"column\": \"age\", \"func\": \"mean\"}, {\"type\": \"MISSING_VALUES\", \"columns\": []}], \"confidence\": 0.98, \"reason\": \"Two distinct read-only queries\"}\n"
-        "  Q: \"Drop the id column and rename sales to revenue\"\n"
-        "  -> {\"intent\": \"TRANSFORM\", \"operations\": [{\"type\": \"DROP_COLUMN\", \"column\": \"id\"}, {\"type\": \"RENAME_COLUMN\", \"column\": \"sales\", \"new_name\": \"revenue\"}], \"confidence\": 0.98, \"reason\": \"Two distinct mutations\"}\n"
-        "  INVESTIGATE:\n"
+  TRANSFORM — EXTREME_VALUE_AMBIGUITY:
+  Q: "change the highest departure delay to 60"
+  → {"intent": "TRANSFORM", "operations": [{"type": "EXTREME_VALUE_AMBIGUITY", "column": "Departure_Delay", "extremum": "max", "target_value": 60}], "confidence": 0.98, "reason": "Ambiguous between capping values above 60 and updating only the maximum row(s)"}
+
+  Q: "set the lowest price to 10"
+  → {"intent": "TRANSFORM", "operations": [{"type": "EXTREME_VALUE_AMBIGUITY", "column": "price", "extremum": "min", "target_value": 10}], "confidence": 0.98, "reason": "Ambiguous between flooring values below 10 and updating only the minimum row(s)"}
+
+  MULTI-OPERATION EXAMPLES:
+  Q: "What is the average age and how many missing values are there in total?"
+  -> {"intent": "DATA_OPERATION", "operations": [{"type": "AGGREGATE", "column": "age", "func": "mean"}, {"type": "MISSING_VALUES", "columns": []}], "confidence": 0.98, "reason": "Two distinct read-only queries"}
+  Q: "Drop the id column and rename sales to revenue"
+  -> {"intent": "TRANSFORM", "operations": [{"type": "DROP_COLUMN", "column": "id"}, {"type": "RENAME_COLUMN", "column": "sales", "new_name": "revenue"}], "confidence": 0.98, "reason": "Two distinct mutations"}
+
+  INVESTIGATE:
   Q: "investigate the dataset" / "analyze this dataset" / "run an investigation"
   â†’ {"intent": "INVESTIGATE", "operations": [], "confidence": 0.96, "reason": "User wants a full autonomous investigation report"}
 

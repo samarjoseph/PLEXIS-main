@@ -108,29 +108,46 @@ class PlanValidator:
         col_lower = {c.lower(): c for c in columns}   # {lower: original}
 
         if plan.target_column:
-            resolved = self._resolve_column(plan.target_column, col_lower)
-            if resolved is not None:
-                # Explicit physical column in dataset takes precedence
-                plan.target_column = resolved
-            elif plan.operation in ("count", "row_count") and plan.target_column.lower() in (
-                "count", "row_count", "rows", "records", "total_rows"
-            ):
-                plan.target_column = None
-            elif plan.operation in ("top_n", "bottom_n", "sort_rows") and plan.target_column.lower() in (
-                "count", "row_count", "rows", "frequency", "size", "rate", "percentage",
-                "proportion", "ratio", "difference", "absolute_difference", "abs_diff",
-                "absolute_difference_mean", "diff", "mean", "average", "median", "sum", "total", "std"
-            ):
-                pass  # Valid derived ranking metric
+            if isinstance(plan.target_column, (list, tuple)):
+                resolved_list = []
+                for tc in plan.target_column:
+                    r = self._resolve_column(tc, col_lower)
+                    if r is not None:
+                        resolved_list.append(r)
+                    else:
+                        return PlanValidationResult(
+                            valid=False,
+                            error_code="COLUMN_NOT_FOUND",
+                            error_message=(
+                                f"Column '{tc}' not found in dataset. "
+                                f"Available: {columns[:15]}"
+                            ),
+                        )
+                plan.target_column = resolved_list
             else:
-                return PlanValidationResult(
-                    valid=False,
-                    error_code="COLUMN_NOT_FOUND",
-                    error_message=(
-                        f"Column '{plan.target_column}' not found in dataset. "
-                        f"Available: {columns[:15]}"
-                    ),
-                )
+                resolved = self._resolve_column(plan.target_column, col_lower)
+                if resolved is not None:
+                    # Explicit physical column in dataset takes precedence
+                    plan.target_column = resolved
+                elif plan.operation in ("count", "row_count") and plan.target_column.lower() in (
+                    "count", "row_count", "rows", "records", "total_rows"
+                ):
+                    plan.target_column = None
+                elif plan.operation in ("top_n", "bottom_n", "sort_rows") and plan.target_column.lower() in (
+                    "count", "row_count", "rows", "frequency", "size", "rate", "percentage",
+                    "proportion", "ratio", "difference", "absolute_difference", "abs_diff",
+                    "absolute_difference_mean", "diff", "mean", "average", "median", "sum", "total", "std"
+                ):
+                    pass  # Valid derived ranking metric
+                else:
+                    return PlanValidationResult(
+                        valid=False,
+                        error_code="COLUMN_NOT_FOUND",
+                        error_message=(
+                            f"Column '{plan.target_column}' not found in dataset. "
+                            f"Available: {columns[:15]}"
+                        ),
+                    )
 
         for col in list(plan.columns):
             resolved = self._resolve_column(col, col_lower)
@@ -145,16 +162,17 @@ class PlanValidator:
         # For group_* operations, target_column is the GROUP KEY (categorical), not the
         # value being aggregated. Skip the numeric check — executor validates internally.
         _GROUP_OPS = frozenset({
-            "group_by", "group_mean", "group_sum", "group_count", "group_min", "group_max", "group_median",
+            "group_by", "group_mean", "group_sum", "group_count", "group_count_filtered", "group_min", "group_max", "group_median",
             "crosstab", "grouped_rate", "two_factor_aggregation", "grouped_binary_comparison", "grouped_multi_stat", "binned_target_rate",
             "zero_vs_positive_comparison",
             "binary_indicator_comparison",
             "filtered_group_ranking",
             "median_split_comparison",
             "tail_risk_group_rate",
-            "date_month_audit"
+            "date_month_audit",
+            "group_metric_difference", "overall_event_rate", "derived_group_comparison",
         })
-        if plan.target_column and plan.operation not in _GROUP_OPS:
+        if plan.target_column and plan.operation not in _GROUP_OPS and not isinstance(plan.target_column, (list, tuple)):
             dtype = column_types.get(plan.target_column, "")
             if plan.operation in NUMERIC_OPERATIONS:
                 if dtype and not self._is_numeric(dtype):

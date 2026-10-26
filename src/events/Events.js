@@ -61,6 +61,10 @@ export const Events = Object.freeze({
    * Payload: { messageId, evidence }
    */
   CHAT_MESSAGE_WITH_EVIDENCE: 'chat:message_with_evidence',
+  /** Fired to prefill the chat input bar with a question or query. Payload: text */
+  PREFILL_CHAT_INPUT:         'chat:prefill_input',
+  /** Fired to clear the chat input bar. */
+  CLEAR_CHAT_INPUT:           'chat:clear_input',
 
   // ── AI context ──────────────────────────────────────────────────────────
   /** Fired when the LLM context changes (workspace summary, session, etc.). */

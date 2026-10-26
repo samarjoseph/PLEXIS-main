@@ -149,13 +149,12 @@ def test_router_fast_paths_f_g_h(synthetic_flight_df):
     assert p_q47 is not None
     assert p_q47["operations"][0]["type"] == "DATE_MONTH_AUDIT"
 
-    # Q53
+    # Average metric selection must use the loaded schema rather than a canned
+    # benchmark value or a preferred dataset-specific delay column.
     ctx_q53 = ExecutionContext(request_id="test-q53", message="What is the average flight delay?")
     ctx_q53.dataset_id = "test-dataset"
     p_q53 = router._fast_path(ctx_q53)
-    assert p_q53 is not None
-    assert "departure_delay" in p_q53["direct_answer"].lower()
-    assert "42.66" in p_q53["direct_answer"]
+    assert p_q53 is None
 
     # Q60
     ctx_q60 = ExecutionContext(request_id="test-q60", message="If the goal is to predict Delay_Target, which available columns could cause target leakage or require further investigation? Identify Departure_Delay as a potential leakage risk, explain why, and distinguish observed dataset facts from assumptions about how the target was generated. Do not train a model or change the dataset.")

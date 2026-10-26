@@ -499,7 +499,7 @@ class IRPlanner:
                     max_tokens=2048,
                 )
             )
-            raw_text = response.text.strip()
+            raw_text = (response.text or "").strip() if response and getattr(response, 'text', None) else ""
         except Exception as e:
             logger.error("[IRPlanner] LLM call failed: %s", e)
             raise RuntimeError(f"Transformation planning failed: {e}") from e
@@ -530,37 +530,82 @@ class IRPlanner:
 
     def _parse_response(self, raw_text: str) -> dict:
         """Parse LLM response into a dict, with recovery for common issues."""
-        # Strip markdown code fences if present
+        if not raw_text or not raw_text.strip():
+            raise ValueError("Model returned an empty response. Please try again.")
+
         text = raw_text.strip()
-        if text.startswith('```'):
-            # Remove ```json ... ``` wrapper
-            text = re.sub(r'^```(?:json)?\s*', '', text)
-            text = re.sub(r'\s*```\s*$', '', text)
 
-        # Try direct parse
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON object from the text
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
+        # 1. Try extracting content inside markdown code fences ```json ... ``` or ``` ... ```
+        fence_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if fence_match:
+            fence_content = fence_match.group(1).strip()
             try:
-                return json.loads(match.group())
+                parsed = json.loads(fence_content)
+                if isinstance(parsed, dict):
+                    return self._validate_ir_dict(parsed)
             except json.JSONDecodeError:
                 pass
 
-        # Try truncated JSON recovery: close unclosed brackets
+        # 2. Try direct parse
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return self._validate_ir_dict(parsed)
+        except json.JSONDecodeError:
+            pass
+
+        # 3. Try to extract JSON object between the outermost curly braces
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            candidate = text[first_brace:last_brace + 1]
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return self._validate_ir_dict(parsed)
+            except json.JSONDecodeError:
+                # 4. Try truncated JSON recovery on candidate: close unclosed brackets
+                for suffix in ['}]}', ']}', '}]}}', '}}']:
+                    try:
+                        parsed = json.loads(candidate + suffix)
+                        if isinstance(parsed, dict):
+                            return self._validate_ir_dict(parsed)
+                    except json.JSONDecodeError:
+                        continue
+
+        # 5. Try truncated JSON recovery on text
         for suffix in ['}]}', ']}', '}]}}', '}}']:
             try:
-                return json.loads(text + suffix)
+                parsed = json.loads(text + suffix)
+                if isinstance(parsed, dict):
+                    return self._validate_ir_dict(parsed)
             except json.JSONDecodeError:
                 continue
 
+        preview = text[:300].strip()
         raise ValueError(
-            f"Could not parse LLM response as JSON. Raw response:\n{raw_text[:500]}"
+            f"Could not parse LLM response as JSON. Response preview:\n{preview}"
         )
+
+    def _validate_ir_dict(self, d: dict) -> dict:
+        """Validate and normalize basic IR dictionary schema."""
+        if not isinstance(d, dict):
+            raise ValueError("Parsed JSON is not an object.")
+        # Normalize alternative keys for steps if steps missing
+        if 'steps' not in d:
+            if 'transformations' in d and isinstance(d['transformations'], list):
+                d['steps'] = d.pop('transformations')
+            elif 'operations' in d and isinstance(d['operations'], list):
+                d['steps'] = d.pop('operations')
+            elif 'plan' in d and isinstance(d['plan'], list):
+                d['steps'] = d.pop('plan')
+            else:
+                d['steps'] = []
+        if not isinstance(d.get('steps'), list):
+            raise ValueError("Transformation plan 'steps' must be a list.")
+        if 'goal' not in d or not d['goal']:
+            d['goal'] = "Applied transformation"
+        return d
 
 
 ir_planner = IRPlanner()

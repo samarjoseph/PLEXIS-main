@@ -18,7 +18,8 @@ if Config.DATABASE_URL:
         Config.DATABASE_URL,
         pool_pre_ping=True,       # detect stale connections
         pool_size=Config.DB_POOL_SIZE,
-        max_overflow=20,
+        max_overflow=30,
+        pool_timeout=10,
         echo=False,               # set True for SQL debug output
     )
     SessionLocal = sessionmaker(

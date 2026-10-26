@@ -53,6 +53,8 @@ scratch/
 /regression_suite_repair_report.md
 
 # Backend temporary scratch files
+/backend/apply_*.py
+/backend/fix_syntax.py
 /backend/test_*.py
 backend/*.txt
 backend/scratch_*.py

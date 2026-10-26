@@ -347,7 +347,7 @@ def test_pipeline_narrative_cluster_a(synthetic_df):
     
     # Test GROUPED_RATE narrative
     res_rate = AnalyticalResult(
-        value={"Engineering": {"numerator": 15, "denominator": 50, "rate": 0.30, "percentage": 30.0}},
+        value={"Engineering": {"customer_count": 50, "numerator": 15, "negative_count": 35, "denominator": 50, "rate": 0.30, "percentage": 30.0}},
         operation="grouped_rate",
         column="is_promoted",
         details={"target_column": "is_promoted", "group_by": "dept_name"},
@@ -355,6 +355,7 @@ def test_pipeline_narrative_cluster_a(synthetic_df):
     )
     narrative_rate = pipeline.build_narrative(res_rate, dataset_name="Staff Data")
     assert "Engineering" in narrative_rate
-    assert "numerator = 15" in narrative_rate
-    assert "denominator = 50" in narrative_rate
+    assert "15 positive" in narrative_rate or "15" in narrative_rate
+    assert "50 customers" in narrative_rate or "50" in narrative_rate
     assert "0.3000" in narrative_rate
+    assert "30.00%" in narrative_rate

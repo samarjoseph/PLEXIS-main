@@ -13,6 +13,12 @@ from .ir import (
     collect_column_refs
 )
 
+AGGREGATION_OPERATOR_WORDS = frozenset({
+    'max', 'min', 'maximum', 'minimum', 'highest', 'lowest',
+    'mean', 'median', 'average', 'avg', 'sum', 'count',
+    'top', 'bottom', 'peak', 'extreme',
+})
+
 logger = logging.getLogger(__name__)
 
 def topological_sort(steps: List[TransformStep]) -> List[TransformStep]:
@@ -103,6 +109,44 @@ class IRValidator:
                 continue
                 
             spec = PRIMITIVE_REGISTRY[step.operation]
+
+            if step.operation in ('REPLACE', 'REPLACE_VALUES'):
+                col_name = step.params.get('column')
+                old_val = step.params.get('old_value')
+                was_quoted = step.params.get('_old_was_quoted', False)
+                if old_val is not None:
+                    str_val = str(old_val).strip().lower()
+                    if str_val in AGGREGATION_OPERATOR_WORDS and not was_quoted:
+                        errors.append(
+                            f"Step {step.id}: Cannot use aggregation or comparative keyword '{old_val}' as a literal value to replace. "
+                            f"Use a capping, flooring, or extremum update transformation instead."
+                        )
+                if df is not None and col_name and col_name in df.columns:
+                    if pd.api.types.is_numeric_dtype(df[col_name].dtype) and isinstance(old_val, str) and not was_quoted:
+                        errors.append(
+                            f"Step {step.id}: Cannot replace string value '{old_val}' in numeric column '{col_name}'."
+                        )
+
+            if step.operation == 'CLIP':
+                col_name = step.params.get('column')
+                if col_name and col_name not in current_columns:
+                    errors.append(f"Step {step.id}: Target column '{col_name}' does not exist")
+                min_v = step.params.get('min')
+                max_v = step.params.get('max')
+                if min_v is None and max_v is None:
+                    errors.append(f"Step {step.id}: CLIP requires at least one of 'min' or 'max'")
+                elif min_v is not None and max_v is not None and min_v > max_v:
+                    errors.append(f"Step {step.id}: CLIP 'min' ({min_v}) cannot be greater than 'max' ({max_v})")
+
+            elif step.operation == 'UPDATE_EXTREMUM':
+                col_name = step.params.get('column')
+                if col_name and col_name not in current_columns:
+                    errors.append(f"Step {step.id}: Target column '{col_name}' does not exist")
+                ext = str(step.params.get('extremum', '')).lower()
+                if ext not in ('max', 'min'):
+                    errors.append(f"Step {step.id}: UPDATE_EXTREMUM requires 'extremum' to be 'max' or 'min', got '{ext}'")
+                if 'new_value' not in step.params or step.params.get('new_value') is None:
+                    errors.append(f"Step {step.id}: UPDATE_EXTREMUM requires 'new_value'")
 
             if step.operation == 'REPLACE' and step.params.get('_old_typed') is not None:
                 typed = step.params['_old_typed']

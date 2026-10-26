@@ -17,6 +17,7 @@ from providers.selector import model_selector
 from providers.registry import provider_registry
 from providers.quarantine import quarantine_manager
 from providers.scheduler import credential_scheduler
+from providers.model_registry import model_registry
 from core.events import event_bus, ProviderFailedEvent, ProviderSwitchedEvent
 
 logger = logging.getLogger(__name__)
@@ -94,14 +95,34 @@ class FallbackEngine:
                 attempts, model_id, provider_name, slot_id_str
             )
 
-            # Call provider
+            # Call provider with active model awareness
             try:
+                active_request = request
+                if getattr(request, 'system_prompt', None):
+                    runtime_note = (
+                        f"\n\n[Active Runtime Model Context: This response is powered by model '{model_id}' "
+                        f"via provider '{provider_name}'. If the user asks which underlying model or provider powers this response, "
+                        f"disclose this information accurately while maintaining your identity as Plexis.]"
+                    )
+                    if hasattr(request, 'model_copy'):
+                        active_request = request.model_copy(update={
+                            "model_id": model_id,
+                            "system_prompt": request.system_prompt + runtime_note
+                        })
+                    else:
+                        request.model_id = model_id
+                        request.system_prompt += runtime_note
+                elif hasattr(request, 'model_copy'):
+                    active_request = request.model_copy(update={"model_id": model_id})
+                elif hasattr(request, 'model_id'):
+                    request.model_id = model_id
+
                 # Pass api_key to provider adapter if supported
                 try:
-                    response = provider_instance.generate(request, api_key=api_key)
+                    response = provider_instance.generate(active_request, api_key=api_key)
                 except TypeError:
                     # Fallback for adapters with older signatures
-                    response = provider_instance.generate(request)
+                    response = provider_instance.generate(active_request)
             except Exception as exc:
                 if slot:
                     credential_scheduler.release_reservation(slot)
@@ -160,14 +181,24 @@ class FallbackEngine:
                 error=str(response.error)
             ))
 
-            # If other slots exist for this provider that might have independent quota,
-            # don't immediately ban the model ID unless all slots are exhausted
-            remaining_slots = [
-                s for s in credential_scheduler.get_slots(provider_name)
-                if quarantine_manager.is_eligible(provider_name, api_key=s.api_key, model_id=model_id)
-            ]
-            if not remaining_slots:
+            # If this is a permanent model configuration error (404 Not Found / 422 Unprocessable),
+            # the model does not exist on this provider for ANY key/slot.
+            status_code = getattr(response, 'status_code', None)
+            err_str = str(response.error).lower()
+            if status_code in (404, 422) or "not found" in err_str:
+                model_registry.mark_permanently_failed(model_id)
                 failed_model_ids.append(model_id)
+            elif status_code in (504, 503, 500) or "deadline" in err_str or "timeout" in err_str:
+                failed_model_ids.append(model_id)
+            else:
+                # If other slots exist for this provider that might have independent quota,
+                # don't immediately ban the model ID unless all slots are exhausted
+                remaining_slots = [
+                    s for s in credential_scheduler.get_slots(provider_name)
+                    if quarantine_manager.is_eligible(provider_name, api_key=s.api_key, model_id=model_id)
+                ]
+                if not remaining_slots:
+                    failed_model_ids.append(model_id)
 
             # Emit provider-switched event if next model is on a different provider
             next_model = model_selector.select_by_model_fallback(

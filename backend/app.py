@@ -1,7 +1,7 @@
 """Flask application factory."""
 import logging
 import sys
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from config import Config
 from core.middleware import init_middleware, setup_logging
@@ -39,7 +39,9 @@ def _verify_db_migration(app: Flask) -> None:
         from db.engine import engine
         import os
 
-        alembic_cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        alembic_cfg = AlembicConfig(os.path.join(backend_dir, "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
         script = ScriptDirectory.from_config(alembic_cfg)
         head_revision = script.get_current_head()
 
@@ -48,12 +50,22 @@ def _verify_db_migration(app: Flask) -> None:
             current_rev = context.get_current_revision()
 
         if current_rev != head_revision:
-            app.logger.error(
-                "[DB] Schema out of date! Current: %s, Head: %s. "
-                "Run: python -m alembic -c alembic.ini upgrade head",
-                current_rev, head_revision,
-            )
-            sys.exit(1)
+            auto_migrate = os.environ.get("AUTO_MIGRATE_DB", "true").lower() in ("true", "1", "yes")
+            if auto_migrate:
+                app.logger.warning(
+                    "[DB] Schema revision mismatch (current: %s, head: %s). Running auto-migration to head...",
+                    current_rev, head_revision
+                )
+                from alembic import command
+                command.upgrade(alembic_cfg, "head")
+                app.logger.info("[DB] Successfully auto-migrated schema to head revision %s", head_revision)
+            else:
+                app.logger.error(
+                    "[DB] Schema out of date! Current: %s, Head: %s. "
+                    "Run: python -m alembic -c alembic.ini upgrade head",
+                    current_rev, head_revision,
+                )
+                sys.exit(1)
         else:
             app.logger.info("[DB] Schema up to date at revision: %s", current_rev)
 
@@ -105,6 +117,14 @@ def create_app() -> Flask:
         app.register_blueprint(chats_bp)
     except ImportError:
         pass  # Not yet implemented — will be added in Phase 6
+
+    @app.route('/health', methods=['GET'])
+    def root_health():
+        return jsonify({
+            "status": "healthy",
+            "service": "plexis-backend",
+            "version": "2.0.0"
+        })
 
     logger = logging.getLogger()
     logger.info("Plexis backend initialized")

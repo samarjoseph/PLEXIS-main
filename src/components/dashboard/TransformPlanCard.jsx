@@ -47,7 +47,7 @@ export default function TransformPlanCard({ plan, datasetId, onApply, onCancel, 
     });
     // Fallback: use affected_columns list if before_sample is empty
     if (Object.keys(map).length === 0 && affected_columns.length > 0) {
-      affected_columns.forEach(col => { map[col] = { count: '?', after: '—' }; });
+      affected_columns.forEach(col => { map[col] = { count: affected_cells_count || 0, after: '—' }; });
     }
     return map;
   }, [before_sample, affected_columns]);
@@ -113,7 +113,19 @@ export default function TransformPlanCard({ plan, datasetId, onApply, onCancel, 
                   <td className="tpc-col-name">{col}</td>
                   <td>{count}</td>
                   {plan.operation_type !== 'IR_COMPOSITE' && (
-                    <td className="tpc-col-action">Replace with <code>{after}</code></td>
+                    <td className="tpc-col-action">
+                      {plan.operation_type === 'CLIP' ? (
+                        operation_payload?.max != null && operation_payload?.min != null
+                          ? `Clip between ${operation_payload.min} and ${operation_payload.max}`
+                          : operation_payload?.max != null
+                          ? `Cap at ${operation_payload.max}`
+                          : `Floor at ${operation_payload.min}`
+                      ) : plan.operation_type === 'UPDATE_EXTREMUM' ? (
+                        `Set ${operation_payload?.extremum || 'extremum'} to ${operation_payload?.new_value}`
+                      ) : (
+                        <>Replace with <code>{after}</code></>
+                      )}
+                    </td>
                   )}
                 </tr>
               ))}
@@ -128,7 +140,15 @@ export default function TransformPlanCard({ plan, datasetId, onApply, onCancel, 
           impactType === 'schema' ? (
             <span><strong>{columnsChanged}</strong> column{columnsChanged === 1 ? '' : 's'} will be renamed/changed.</span>
           ) : (
-            <span><strong>{affected_cells_count}</strong> {affected_cells_count === 1 ? 'cell' : 'cells'} will change.</span>
+            <span>
+              <strong>{affected_cells_count}</strong> {affected_cells_count === 1 ? 'cell' : 'cells'} will change.
+              {operation_payload?.expected_extremum?.max != null && (
+                <span> (Expected new max: <strong>{operation_payload.expected_extremum.max}</strong>)</span>
+              )}
+              {operation_payload?.expected_extremum?.min != null && (
+                <span> (Expected new min: <strong>{operation_payload.expected_extremum.min}</strong>)</span>
+              )}
+            </span>
           )
         ) : (
           <span className="tpc-no-changes">No changes needed.</span>

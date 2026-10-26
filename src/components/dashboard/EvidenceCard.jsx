@@ -1,17 +1,23 @@
 /**
  * EvidenceCard — inline evidence preview rendered inside MessageBubbleV2.
  *
- * Displayed when an AI message contains a message.evidence object.
- * Shows type badge, row count, key/value preview, and action buttons.
+ * Displayed when an AI message contains a valid message.evidence object
+ * representing an investigation finding (outliers, missing values, duplicates, etc.).
+ * Shows type badge, row count, key/value preview, and contextual actions.
  *
- * Actions emit EventBus events — no prop callbacks needed.
+ * CONTEXTUAL VISIBILITY RULES:
+ *   - [Locate] is rendered ONLY when a valid, supported location target exists:
+ *     row_indices, locator filter, or source row identifiers.
+ *   - [Explain] is rendered ONLY when the finding is an anomaly or diagnostic
+ *     (outliers, missing, duplicates) or explicitly flagged with allow_explain.
+ *   - Plain summaries, hollow badges, or records with 0 rows and no location target
+ *     DO NOT render empty action containers or dead buttons.
+ *
+ * Actions emit EventBus events:
  *   [Locate]  → EVIDENCE_SELECTED + NAVIGATE_TO_EVIDENCE (opens workspace, scrolls to rows)
  *   [Explain] → WORKSPACE_ACTION_REQUESTED (fires follow-up question to /api/ask)
- *
- * For EvidenceCollection: renders multi-colored reference list.
- * Data comes entirely from evidence.preview_rows — no extra API call.
  */
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Zap, ChevronDown, ChevronUp, AlertTriangle, Layers } from 'lucide-react';
 import { EventBus } from '../../events/EventBus.js';
@@ -47,53 +53,76 @@ const TYPE_COLORS = {
 export default function EvidenceCard({ evidence }) {
   const [expanded, setExpanded] = useState(false);
 
-  if (!evidence) return null;
+  // Normalize single-item array or malformed evidence
+  const normalized = Array.isArray(evidence) ? (evidence.length === 1 ? evidence[0] : null) : evidence;
+  const evidenceId = normalized?.id;
 
-  // Register in EvidenceRegistry on first render
-  React.useEffect(() => {
-    if (evidence?.id) {
-      EvidenceRegistry.register(evidence);
+  // Register in EvidenceRegistry on first render if ID present
+  useEffect(() => {
+    if (evidenceId && normalized) {
+      EvidenceRegistry.register(normalized);
     }
-  }, [evidence?.id]);
+  }, [evidenceId, normalized]);
 
-  if (evidence.type === 'collection') {
-    return <EvidenceCollectionCard evidence={evidence} />;
+  if (!normalized || typeof normalized !== 'object') return null;
+
+  if (normalized.type === 'collection') {
+    return <EvidenceCollectionCard evidence={normalized} />;
   }
 
-  const color = TYPE_COLORS[evidence.type] || TYPE_COLORS.default;
-  const typeLabel = TYPE_LABELS[evidence.type] || evidence.type;
-  const previewRows = evidence.preview_rows || [];
-  const isStable = evidence.locator?.is_stable !== false;
-  const rowCount = evidence.metadata?.outlier_count
-    ?? evidence.metadata?.duplicate_count
-    ?? evidence.metadata?.missing_count
-    ?? evidence.metadata?.count
-    ?? evidence.metadata?.n
-    ?? previewRows.length
-    ?? 0;
+  const color = TYPE_COLORS[normalized.type] || TYPE_COLORS.default;
+  const typeLabel = TYPE_LABELS[normalized.type] || normalized.type || 'Evidence';
+  const previewRows = Array.isArray(normalized.preview_rows) ? normalized.preview_rows : [];
+  const isStable = normalized.locator?.is_stable !== false;
+
+  const rowCount = normalized.metadata?.outlier_count
+    ?? normalized.metadata?.duplicate_count
+    ?? normalized.metadata?.missing_count
+    ?? normalized.metadata?.count
+    ?? normalized.metadata?.n
+    ?? (previewRows.length > 0 ? previewRows.length : 0);
+
+  // Contextual action availability checks
+  const canLocate = Boolean(
+    (normalized.locator?.row_indices && normalized.locator.row_indices.length > 0) ||
+    normalized.locator?.filter ||
+    (normalized.row_indices && normalized.row_indices.length > 0) ||
+    (normalized.metadata?.row_indices && normalized.metadata.row_indices.length > 0) ||
+    (previewRows.length > 0 && previewRows.some(r => r && (r.source_row_number != null || r._row_number != null || r.dataframe_index != null)))
+  );
+
+  const canExplain = Boolean(
+    normalized.allow_explain === true ||
+    normalized.metadata?.allow_explain === true ||
+    ['outliers', 'missing', 'duplicates', 'anomaly', 'drift'].includes(normalized.type)
+  );
+
+  const hasActions = canLocate || canExplain;
+
+  // If there are no preview rows, 0 row count, no description, and no actions, don't render a hollow card
+  if (previewRows.length === 0 && rowCount === 0 && !normalized.description && !hasActions) {
+    return null;
+  }
 
   const handleLocate = () => {
-    EventBus.emit(Events.EVIDENCE_SELECTED, { evidenceId: evidence.id, evidence });
+    EventBus.emit(Events.EVIDENCE_SELECTED, { evidenceId: normalized.id, evidence: normalized });
     EventBus.emit(Events.WORKSPACE_OPENED, {});
-    EventBus.emit(Events.NAVIGATE_TO_EVIDENCE, { evidenceId: evidence.id });
+    EventBus.emit(Events.NAVIGATE_TO_EVIDENCE, { evidenceId: normalized.id });
   };
 
   const handleExplain = () => {
     EventBus.emit(Events.WORKSPACE_ACTION_REQUESTED, {
       type: 'explain_evidence',
-      evidenceId: evidence.id,
-      description: evidence.description,
-      // Pass full evidence so the backend has computed stats/metadata available.
-      // The LLM must explain the EXISTING result, not rediscover or recode it.
+      evidenceId: normalized.id,
+      description: normalized.description,
       evidence: {
-        id: evidence.id,
-        type: evidence.type,
-        description: evidence.description,
-        metadata: evidence.metadata || {},
-        preview_rows: (evidence.preview_rows || []).slice(0, 5),
-        locator: evidence.locator || null,
+        id: normalized.id,
+        type: normalized.type,
+        description: normalized.description,
+        metadata: normalized.metadata || {},
+        preview_rows: (normalized.preview_rows || []).slice(0, 5),
+        locator: normalized.locator || null,
       },
-      // Neutral trigger — backend's explain_evidence handler builds the real grounded prompt
       prefilledQuestion: 'Explain this result.',
     });
   };
@@ -133,7 +162,9 @@ export default function EvidenceCard({ evidence }) {
       </div>
 
       {/* Description */}
-      <div className="ev-card-desc">{evidence.description}</div>
+      {normalized.description && (
+        <div className="ev-card-desc">{normalized.description}</div>
+      )}
 
       {/* Preview rows */}
       <AnimatePresence>
@@ -147,7 +178,7 @@ export default function EvidenceCard({ evidence }) {
           >
             {previewRows.slice(0, 3).map((row, i) => (
               <div key={i} className="ev-card-row">
-                {Object.entries(row).slice(0, 4).map(([k, v]) => (
+                {Object.entries(row || {}).slice(0, 4).map(([k, v]) => (
                   <div key={k} className="ev-card-cell">
                     <span className="ev-card-cell-key">{k}</span>
                     <span className="ev-card-cell-val">{v == null ? '—' : String(v)}</span>
@@ -159,29 +190,35 @@ export default function EvidenceCard({ evidence }) {
         )}
       </AnimatePresence>
 
-      {/* Actions */}
-      <div className="ev-card-actions">
-        <motion.button
-          type="button"
-          className="ev-card-action ev-card-action--primary"
-          onClick={handleLocate}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-        >
-          <MapPin size={12} />
-          Locate
-        </motion.button>
-        <motion.button
-          type="button"
-          className="ev-card-action ev-card-action--secondary"
-          onClick={handleExplain}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-        >
-          <Zap size={12} />
-          Explain
-        </motion.button>
-      </div>
+      {/* Contextual Actions — rendered ONLY when at least one action is valid and supported */}
+      {hasActions && (
+        <div className="ev-card-actions">
+          {canLocate && (
+            <motion.button
+              type="button"
+              className="ev-card-action ev-card-action--primary"
+              onClick={handleLocate}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+            >
+              <MapPin size={12} />
+              Locate
+            </motion.button>
+          )}
+          {canExplain && (
+            <motion.button
+              type="button"
+              className="ev-card-action ev-card-action--secondary"
+              onClick={handleExplain}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+            >
+              <Zap size={12} />
+              Explain
+            </motion.button>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -208,7 +245,7 @@ function EvidenceCollectionCard({ evidence }) {
           {refs.length} Evidence Groups
         </div>
       </div>
-      <div className="ev-card-desc">{evidence.summary}</div>
+      {evidence.summary && <div className="ev-card-desc">{evidence.summary}</div>}
       <div className="ev-card-legend">
         {refs.map((ref, i) => (
           <div key={ref.id || i} className="ev-card-legend-item">
@@ -217,18 +254,20 @@ function EvidenceCollectionCard({ evidence }) {
           </div>
         ))}
       </div>
-      <div className="ev-card-actions">
-        <motion.button
-          type="button"
-          className="ev-card-action ev-card-action--primary"
-          onClick={handleLocateAll}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-        >
-          <MapPin size={12} />
-          Locate All
-        </motion.button>
-      </div>
+      {refs.length > 0 && (
+        <div className="ev-card-actions">
+          <motion.button
+            type="button"
+            className="ev-card-action ev-card-action--primary"
+            onClick={handleLocateAll}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+          >
+            <MapPin size={12} />
+            Locate All
+          </motion.button>
+        </div>
+      )}
     </motion.div>
   );
 }

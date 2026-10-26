@@ -2,13 +2,13 @@
  * MessageBubbleV2 — Main AI message renderer.
  *
  * Changes (UX Correction Pass):
- *   - Action buttons removed from AnalyticalResultCard (they're in VerticalActionMenu now)
- *   - VerticalActionMenu added beside Copy button in message footer
- *   - ThinkingV2 no longer rendered here — AIThinkingIndicator in ChatAreaV2 covers this
- *   - Plexis avatar: gradient mark instead of plain white square
- *   - responseActions + analysisId + result passed to VerticalActionMenu
+ *   - Structured tabular rendering support via AnalyticalResultCard for grouped/tabular metrics
+ *   - Dense inline prose clean-up: displays clean lead summary when structured table is present
+ *   - Duplicate hollow EvidenceCard suppression when analytical results are rendered
+ *   - Contextual actions in VerticalActionMenu (⋮) beside Copy button
+ *   - Full markdown table and prose support preserved
  */
-import React, { useState } from 'react';
+import { useState, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion } from 'framer-motion';
@@ -22,8 +22,9 @@ import VerticalActionMenu from './VerticalActionMenu.jsx';
 import TransformPlanCard from './TransformPlanCard.jsx';
 import TransformResultCard from './TransformResultCard.jsx';
 import TransformationClarificationCard from './TransformationClarificationCard.jsx';
+import { getDisplayProse } from '../../utils/analyticalFormatting.js';
 
-export default function MessageBubbleV2({
+function MessageBubbleV2({
   message,
   onRetry,
   onApplyTransform,
@@ -31,7 +32,6 @@ export default function MessageBubbleV2({
   onClarificationAction,
   onUndoTransform,
   onExportDataset,
-  isApplyingTransform,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -101,7 +101,7 @@ export default function MessageBubbleV2({
     );
   }
 
-  /* ── Transformation Plan ── */
+  /* ── Transformation Clarification ── */
   if (message.transformationClarification) {
     return (
       <div className="v2-msg-ai">
@@ -161,11 +161,48 @@ export default function MessageBubbleV2({
   const isStreaming = !!message.isStreaming;
   const hasContent = typeof message.text === 'string' && message.text.length > 0;
 
-  // Analytical result context for VerticalActionMenu
-  const analysisId = message.analysisId || null;
+  // Resolve analytical result safely from either message.result or direct evidence
+  let effectiveResult = null;
+  if (message.result) {
+    effectiveResult = message.result;
+  } else if (message.evidence && !Array.isArray(message.evidence) && message.evidence.value != null && message.evidence.operation) {
+    effectiveResult = message.evidence;
+  } else if (Array.isArray(message.evidence) && message.evidence[0]?.value != null && message.evidence[0]?.operation) {
+    effectiveResult = message.evidence[0];
+  }
+
+  const effectiveAnalysisId = message.analysisId || effectiveResult?.analysis_id || null;
   const responseActions = message.responseActions || null;
-  const result = message.result || null;
-  const hasAnalyticalActions = !!(analysisId && responseActions);
+
+  // Detect whether a structured analytical table is rendering
+  let hasStructuredTable = false;
+  if (effectiveResult) {
+    const val = effectiveResult.value;
+    if (effectiveResult.type === 'grouped' || effectiveResult.operation?.toLowerCase?.().startsWith('group_')) {
+      hasStructuredTable = true;
+    } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && Object.keys(val).length > 0) {
+      hasStructuredTable = true;
+    } else if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+      hasStructuredTable = true;
+    }
+  }
+
+  // Contextual actions availability for VerticalActionMenu (⋮)
+  const hasAnalyticalActions = !!(effectiveAnalysisId && responseActions);
+
+  // Suppress duplicate EvidenceCard if the same analytical operation is already rendered
+  let shouldRenderEvidenceCard = !isStreaming && Boolean(message.evidence);
+  if (shouldRenderEvidenceCard && effectiveAnalysisId && effectiveResult) {
+    if (message.evidence.analysis_id === effectiveAnalysisId) {
+      shouldRenderEvidenceCard = false;
+    } else if (Array.isArray(message.evidence) && message.evidence.some(e => e?.analysis_id === effectiveAnalysisId)) {
+      shouldRenderEvidenceCard = false;
+    } else if (!message.evidence.preview_rows?.length && !message.evidence.locator && !['outliers', 'missing', 'duplicates', 'collection'].includes(message.evidence.type)) {
+      shouldRenderEvidenceCard = false;
+    }
+  }
+
+  const displayProse = getDisplayProse(message.text, hasStructuredTable);
 
   return (
     <motion.div
@@ -189,7 +226,7 @@ export default function MessageBubbleV2({
         {hasContent && (
           <div className="v2-prose">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.text}
+              {displayProse}
             </ReactMarkdown>
           </div>
         )}
@@ -206,7 +243,7 @@ export default function MessageBubbleV2({
             {message.sources?.length > 0 && (
               <div className="v2-msg-citations">
                 {message.sources.slice(0, 4).map((url, idx) => {
-                  let domain = 'Source';
+                  let domain;
                   try {
                     domain = new URL(url).hostname.replace('www.', '');
                   } catch {
@@ -229,16 +266,16 @@ export default function MessageBubbleV2({
           </div>
         )}
 
-        {/* Evidence Card */}
-        {!isStreaming && message.evidence && (
+        {/* Evidence Card — only shown for diagnostic findings (outliers, missing, etc.), not duplicate analytical results */}
+        {shouldRenderEvidenceCard && (
           <EvidenceCard evidence={message.evidence} />
         )}
 
-        {/* Analytical Result Card — no action buttons inside */}
-        {!isStreaming && analysisId && result && (
+        {/* Analytical Result Card — structured table or scalar metric */}
+        {!isStreaming && effectiveAnalysisId && effectiveResult && (
           <AnalyticalResultCard
-            analysisId={analysisId}
-            result={result}
+            analysisId={effectiveAnalysisId}
+            result={effectiveResult}
           />
         )}
 
@@ -262,9 +299,9 @@ export default function MessageBubbleV2({
             {/* Vertical ⋮ menu — only rendered when analytical actions are available */}
             {hasAnalyticalActions && (
               <VerticalActionMenu
-                analysisId={analysisId}
+                analysisId={effectiveAnalysisId}
                 responseActions={responseActions}
-                result={result}
+                result={effectiveResult}
               />
             )}
           </div>
@@ -273,3 +310,5 @@ export default function MessageBubbleV2({
     </motion.div>
   );
 }
+
+export default memo(MessageBubbleV2);

@@ -37,7 +37,8 @@ function DashboardInner() {
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [stagedFile, setStagedFile] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingChatIds, setLoadingChatIds] = useState(() => new Set());
+  const isLoading = activeId ? loadingChatIds.has(activeId) : false;
   const [chartType, setChartType] = useState('bar');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState(null);
@@ -304,6 +305,7 @@ function DashboardInner() {
   const handleNewChat = () => {
     setActiveId(null);
     setInputText('');
+    EventBus.emit(Events.CLEAR_CHAT_INPUT);
     setStagedFile(null);
     setSidebarMobileOpen(false);
   };
@@ -314,10 +316,10 @@ function DashboardInner() {
   };
 
   // ── Send Message ───────────────────────────────────────────
-  async function handleSend(retryText = null, retryFile = null, errorMsgIdToRemove = null, extraOptions = {}) {
-    const isRetry = retryText !== null || retryFile !== null;
-    const runtimeText = extraOptions.message ?? (isRetry ? retryText : inputText);
-    const runtimeFile = isRetry ? retryFile : stagedFile;
+  async function handleSend(retryOrText = null, retryOrFile = null, errorMsgIdToRemove = null, extraOptions = {}) {
+    const isRetry = Boolean(errorMsgIdToRemove || extraOptions.isRetry);
+    const runtimeText = extraOptions.message ?? (typeof retryOrText === 'string' ? retryOrText : inputText);
+    const runtimeFile = retryOrFile !== null ? retryOrFile : stagedFile;
 
     if (!runtimeText?.trim() && !runtimeFile) return;
 
@@ -357,8 +359,30 @@ function DashboardInner() {
       setStagedFile(null);
     }
 
+    // Prevent sending another message on this specific chat while its response is generating
+    if (targetId && loadingChatIds.has(targetId)) return;
+
     setConversations((prev) => updateConversation(prev, targetId, { messages: updatedMessages }));
-    setIsLoading(true);
+    setLoadingChatIds((prev) => new Set(prev).add(targetId));
+
+    // Dynamic AI title generation (only once at the start of conversation)
+    const shouldNameChat = (!currentConv.named && (currentConv.title === 'New Chat' || !currentConv.title));
+    if (shouldNameChat) {
+      currentConv.named = true;
+      setConversations((prev) => updateConversation(prev, targetId, { named: true }));
+      PlexisAPI.generateChatTitle({
+        message: runtimeText,
+        filename: runtimeFile?.name || '',
+      }).then((aiTitle) => {
+        if (aiTitle && aiTitle !== 'New Chat') {
+          setConversations((prev) =>
+            updateConversation(prev, targetId, { title: aiTitle, named: true })
+          );
+        }
+      }).catch((err) => {
+        console.warn('[Dashboard] Title generation failed:', err);
+      });
+    }
 
     // ── File Upload → SSE Streaming Path ────────────────────────
     if (runtimeFile) {
@@ -421,25 +445,31 @@ function DashboardInner() {
             }
 
             setStreamingMessageId(null);
-            setIsLoading(false);
+            setLoadingChatIds((prev) => {
+              const next = new Set(prev);
+              next.delete(targetId);
+              return next;
+            });
             setConversations((prev) =>
-              updateConversation(prev, streamingTargetIdRef.current, {
+              updateConversation(prev, targetId, {
                 messages: prev
-                  .find(c => c.id === streamingTargetIdRef.current)
+                  .find(c => c.id === targetId)
                   ?.messages.map(m => m.id === streamMsgId ? { ...m, text: accumulatedText, isStreaming: false } : m) ?? [],
                 activeDatasetName: nextDatasetName,
                 datasetName: nextDatasetName,
                 datasetId,
                 ...(nextDatasetStats && { datasetStats: nextDatasetStats }),
-                title: prev.find(c => c.id === streamingTargetIdRef.current)?.title === 'New Chat'
-                  ? `Dataset: ${runtimeFile.name}`
-                  : prev.find(c => c.id === streamingTargetIdRef.current)?.title,
+                title: prev.find(c => c.id === targetId)?.title || `Dataset: ${runtimeFile.name}`,
               })
             );
           })
           .on('error', ({ message }) => {
             setStreamingMessageId(null);
-            setIsLoading(false);
+            setLoadingChatIds((prev) => {
+              const next = new Set(prev);
+              next.delete(targetId);
+              return next;
+            });
             const errMsg = {
               id: `err-${Date.now()}`,
               sender: 'system_error',
@@ -460,7 +490,11 @@ function DashboardInner() {
       } catch (err) {
         console.error('Upload stream error:', err);
         setStreamingMessageId(null);
-        setIsLoading(false);
+        setLoadingChatIds((prev) => {
+          const next = new Set(prev);
+          next.delete(targetId);
+          return next;
+        });
         setConversations((prev) =>
           updateConversation(prev, targetId, {
             messages: [...updatedMessages, {
@@ -576,31 +610,11 @@ function DashboardInner() {
         });
       }
 
-      // Generate smart title
-      let title = currentConv.title;
-      if (title === 'New Chat' && runtimeText.trim()) {
-        try {
-          const titleResult = await PlexisAPI.askQuestion(
-            `Generate a concise conversation title in maximum 5 words for this message. Return ONLY the title, nothing else: "${runtimeText.trim().slice(0, 200)}"`
-          );
-          const aiTitle = extractResponseText(titleResult)?.trim().replace(/^[\"']|[\"']$/g, '');
-          if (aiTitle && aiTitle.length > 0 && aiTitle.length < 50) {
-            title = aiTitle;
-          } else {
-            title = runtimeText.trim().split(' ').slice(0, 5).join(' ');
-            if (title.length > 35) title = title.slice(0, 32) + '...';
-          }
-        } catch {
-          title = runtimeText.trim().split(' ').slice(0, 5).join(' ');
-          if (title.length > 35) title = title.slice(0, 32) + '...';
-        }
-      }
-
       setConversations((prev) =>
         updateConversation(prev, targetId, {
           messages: [...updatedMessages, aiMessage],
           chartData: nextChartData,
-          title,
+          title: prev.find(c => c.id === targetId)?.title || currentConv.title,
         })
       );
     } catch (err) {
@@ -616,12 +630,16 @@ function DashboardInner() {
         })
       );
     } finally {
-      setIsLoading(false);
+      setLoadingChatIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetId);
+        return next;
+      });
     }
   };
 
   const handleRetry = (msg) => {
-    if (msg.retryPayload) handleSend(msg.retryPayload.text, msg.retryPayload.file, msg.id);
+    if (msg.retryPayload) handleSend(msg.retryPayload.text, msg.retryPayload.file, msg.id, { isRetry: true });
   };
 
   // ── Transform Handlers ─────────────────────────────────────
@@ -749,6 +767,7 @@ function DashboardInner() {
         collapsed={sidebarCollapsed}
         mobileOpen={sidebarMobileOpen}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        onCloseMobile={() => setSidebarMobileOpen(false)}
         conversations={conversations}
         activeId={activeId}
         searchQuery={searchQuery}

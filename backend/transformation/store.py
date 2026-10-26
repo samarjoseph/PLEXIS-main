@@ -60,6 +60,8 @@ class TransformationStore:
         self._plans: Dict[str, TransformationPlan] = {}  # plan_id -> plan
         self._session_latest: Dict[str, str] = {}       # session_id -> plan_id
         self._pending: Dict[tuple[str, str], PendingTransformationContext] = {}
+        self._pending_by_id: Dict[str, PendingTransformationContext] = {}
+        self._pending_by_dataset: Dict[str, PendingTransformationContext] = {}
         self._lock = threading.Lock()
 
     def store(self, plan: TransformationPlan, session_id: Optional[str] = None) -> None:
@@ -108,6 +110,23 @@ class TransformationStore:
             if old:
                 old.status = 'INVALIDATED'
             self._pending[key] = pending
+            if getattr(pending, 'transformation_id', None):
+                self._pending_by_id[str(pending.transformation_id)] = pending
+            if getattr(pending, 'dataset_id', None):
+                self._pending_by_dataset[str(pending.dataset_id)] = pending
+
+    def get_pending_by_id(self, transformation_id: str) -> Optional[PendingTransformationContext]:
+        """Look up active pending clarification context directly by its transformation_id."""
+        with self._lock:
+            if not transformation_id:
+                return None
+            pending = self._pending_by_id.get(str(transformation_id))
+            if pending and pending.status in ('AWAITING_CLARIFICATION', 'READY_FOR_REVIEW', 'CORRECTING'):
+                if datetime.now(timezone.utc) - pending.created_at > timedelta(hours=_PLAN_TTL_HOURS):
+                    pending.status = 'EXPIRED'
+                    return None
+                return pending
+            return None
 
     def pending_for(self, conversation_id: str, dataset_id: str) -> Optional[PendingTransformationContext]:
         with self._lock:
@@ -117,6 +136,25 @@ class TransformationStore:
                     pending.status = 'EXPIRED'
                     return None
                 return pending
+            return None
+
+    def pending_for_dataset(self, dataset_id: str) -> Optional[PendingTransformationContext]:
+        """Look up active pending clarification context directly by dataset_id."""
+        with self._lock:
+            if not dataset_id:
+                return None
+            pending = self._pending_by_dataset.get(str(dataset_id))
+            if pending and pending.status in ('AWAITING_CLARIFICATION', 'READY_FOR_REVIEW', 'CORRECTING'):
+                if datetime.now(timezone.utc) - pending.created_at > timedelta(hours=_PLAN_TTL_HOURS):
+                    pending.status = 'EXPIRED'
+                    return None
+                return pending
+            for (cid, did), p in list(self._pending.items()):
+                if did == str(dataset_id) and p and p.status in ('AWAITING_CLARIFICATION', 'READY_FOR_REVIEW', 'CORRECTING'):
+                    if datetime.now(timezone.utc) - p.created_at > timedelta(hours=_PLAN_TTL_HOURS):
+                        p.status = 'EXPIRED'
+                        return None
+                    return p
             return None
 
     def update_pending(self, pending: PendingTransformationContext) -> None:
@@ -145,6 +183,10 @@ class TransformationStore:
                 pending.status = status
                 if status not in ('READY_FOR_REVIEW', 'AWAITING_CLARIFICATION'):
                     self._pending.pop(key, None)
+                    if getattr(pending, 'transformation_id', None):
+                        self._pending_by_id.pop(str(pending.transformation_id), None)
+                    if getattr(pending, 'dataset_id', None):
+                        self._pending_by_dataset.pop(str(pending.dataset_id), None)
 
     def finish_plan_context(self, plan_id: str, status: str) -> None:
         """Close the active conversation when its plan is applied/cancelled."""
@@ -153,6 +195,10 @@ class TransformationStore:
                 if pending.current_plan_id == plan_id:
                     pending.status = status
                     self._pending.pop(key, None)
+                    if getattr(pending, 'transformation_id', None):
+                        self._pending_by_id.pop(str(pending.transformation_id), None)
+                    if getattr(pending, 'dataset_id', None):
+                        self._pending_by_dataset.pop(str(pending.dataset_id), None)
 
     def _evict_stale(self) -> None:
         """Evict plans older than TTL."""

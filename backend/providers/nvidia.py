@@ -67,9 +67,10 @@ class NvidiaProvider(IProviderAdapter):
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
-                if request.system_prompt:
-                    messages.append({'role': 'system', 'content': request.system_prompt})
                 messages.append({'role': 'user', 'content': request.task})
+
+            if request.system_prompt and not any(m.get('role') == 'system' for m in messages):
+                messages.insert(0, {'role': 'system', 'content': request.system_prompt})
 
             headers = {
                 'Authorization': f'Bearer {effective_key}',
@@ -91,7 +92,7 @@ class NvidiaProvider(IProviderAdapter):
                 body['response_format'] = {'type': 'json_object'}
 
             start_time = time.time()
-            response = requests.post(self.endpoint, headers=headers, json=body, timeout=60)
+            response = requests.post(self.endpoint, headers=headers, json=body, timeout=(3.0, 5.0))
             
             if response.status_code == 429:
                 from providers.quarantine import parse_retry_after
@@ -112,7 +113,8 @@ class NvidiaProvider(IProviderAdapter):
             latency_ms = (time.time() - start_time) * 1000
             
             data = response.json()
-            text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+            raw_content = data.get('choices', [{}])[0].get('message', {}).get('content')
+            text = (raw_content or '').strip()
             usage = data.get('usage', {})
             input_tokens = usage.get('prompt_tokens', 0)
             output_tokens = usage.get('completion_tokens', 0)
@@ -152,9 +154,10 @@ class NvidiaProvider(IProviderAdapter):
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
-                if request.system_prompt:
-                    messages.append({'role': 'system', 'content': request.system_prompt})
                 messages.append({'role': 'user', 'content': request.task})
+
+            if request.system_prompt and not any(m.get('role') == 'system' for m in messages):
+                messages.insert(0, {'role': 'system', 'content': request.system_prompt})
 
             headers = {
                 'Authorization': f'Bearer {effective_key}',
@@ -172,7 +175,7 @@ class NvidiaProvider(IProviderAdapter):
                 'stream': True
             }
 
-            with requests.post(self.endpoint, headers=headers, json=body, stream=True, timeout=60) as response:
+            with requests.post(self.endpoint, headers=headers, json=body, stream=True, timeout=(3.0, 10.0)) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line:

@@ -41,10 +41,15 @@ def build_context_block(
 
     # --- Dataset context: only mention it if relevant ---
     if schema_context:
-        parts.append(f"DATASET CONTEXT (Deterministic Schema): {json.dumps(schema_context)}")
+        parts.append(f"DATASET CONTEXT (Deterministic Schema):\n{json.dumps(schema_context, indent=2)}")
         parts.append(
-            "CRITICAL: If asked about the dataset structure (e.g. columns, fields), "
-            "use the exact schema provided above. Do NOT guess or hallucinate."
+            "CRITICAL SCHEMA GROUNDING RULES:\n"
+            "- The list of columns above is the COMPLETE and EXCLUSIVE schema of the active dataset.\n"
+            "- If the user asks to calculate, analyze, or query a column or field that does NOT exist in the schema list above (e.g. asking for a nonexistent column, score, or ticket price):\n"
+            "  1. Explicitly state that the column or field does not exist and is not present in this dataset schema.\n"
+            "  2. Clearly list the actual relevant columns available in the dataset.\n"
+            "  3. Do NOT substitute, invent, or hallucinate values for missing fields.\n"
+            "- If asked whether an arbitrary identifier (e.g. customerID, flight_id, order_id) can legitimately be used as a numeric predictor, explain that it is an arbitrary text/string identifier (not a measured numeric variable) and cannot legitimately be used as a numeric predictor."
         )
         
     if dataset_filename:
@@ -89,8 +94,8 @@ def build_context_block(
         try:
             facts_str = json.dumps(facts, indent=2, default=str)
             # Truncate very large fact payloads to prevent prompt bloat
-            if len(facts_str) > 10000:
-                facts_str = facts_str[:10000] + "\n... [truncated for brevity]"
+            if len(facts_str) > 3000:
+                facts_str = facts_str[:3000] + "\n... [truncated for brevity]"
             parts.append(facts_str)
         except Exception:
             parts.append(str(facts))

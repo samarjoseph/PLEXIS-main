@@ -6,7 +6,11 @@
  * v2.1: Chat API + X-User-Email identity header for DB persistence.
  */
 
-const BASE_URL = "http://localhost:5000";
+// Dynamic backend URL configuration for Cloudflare Pages and local development
+const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const BASE_URL = RAW_BASE_URL
+  ? RAW_BASE_URL.replace(/\/+$/, '')
+  : (import.meta.env.DEV ? "http://localhost:5000" : "");
 
 /**
  * Get the current user email from localStorage or default to dev user.
@@ -416,5 +420,27 @@ export const PlexisAPI = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Generate a fast, dynamic conversation title via small LLM.
+   * Called once at the start of a conversation.
+   * @param {Object} params - { message, filename }
+   */
+  async generateChatTitle({ message = '', filename = '' }) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/title`, {
+        method: 'POST',
+        headers: defaultHeaders(),
+        body: JSON.stringify({ message, filename }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.title) return data.title;
+      }
+    } catch (err) {
+      console.warn('[PlexisAPI] generateChatTitle error:', err);
+    }
+    return null;
   },
 };

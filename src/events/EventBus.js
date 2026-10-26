@@ -108,3 +108,4 @@ class EventBusClass {
 }
 
 export const EventBus = new EventBusClass();
+export default EventBus;

@@ -346,6 +346,8 @@ _register(PrimitiveSpec('ROUND', 'Round numeric values',
 _register(PrimitiveSpec('CLIP', 'Clip values to a range',
                         required_params=['column'],
                         optional_params=['min', 'max']))
+_register(PrimitiveSpec('UPDATE_EXTREMUM', 'Update only the maximal or minimal observation(s)',
+                        required_params=['column', 'extremum', 'new_value']))
 _register(PrimitiveSpec('EXTRACT_DATE_PART', 'Extract part of a date column',
                         required_params=['column', 'part', 'output_column'],
                         modifies_shape=True))

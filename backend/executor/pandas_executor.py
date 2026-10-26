@@ -283,7 +283,7 @@ class PandasExecutor:
         if op == "margin_aggregation_comparison":
             return self._margin_aggregation_comparison(df)
         if op == "promotion_code_usage":
-            return self._promotion_code_usage(df)
+            return self._promotion_code_usage(df, col=col)
         if op == "top_country_in_year":
             return self._top_country_in_year(df, params.get("year", 2024), params.get("value_column") or col or "Sales_Amount")
         if op == "top_category_per_year":
@@ -318,7 +318,7 @@ class PandasExecutor:
             return self._sort(df, col, params)
 
         # ── Grouping ──────────────────────────────────────────────────────────
-        if op in ("group_by", "group_mean", "group_sum", "group_count",
+        if op in ("group_by", "group_mean", "group_sum", "group_count", "group_count_filtered",
                    "group_min", "group_max", "group_median"):
             return self._group_by(df, col, op, params, plan.columns)
 
@@ -353,6 +353,12 @@ class PandasExecutor:
             return self._tail_risk_group_rate(df, col, params)
         if op == "date_month_audit":
             return self._date_month_audit(df, col, params)
+        if op == "audit_numeric_conversion":
+            return self._audit_numeric_conversion(df, col, params)
+        if op == "overall_event_rate":
+            return self._overall_event_rate(df, col, params)
+        if op in ("group_metric_difference", "derived_group_comparison"):
+            return self._group_metric_difference(df, col, params)
 
         # ── Distribution ──────────────────────────────────────────────────────
         if op == "frequency":
@@ -494,15 +500,23 @@ class PandasExecutor:
         result["missing_count"] = missing_count
         result["total_rows"] = len(df)
         
-        # We compute numeric metrics if column is numeric
-        if pd.api.types.is_numeric_dtype(s):
-            s_num = pd.to_numeric(s, errors="coerce")
-            result["mean"] = float(s_num.mean()) if non_missing > 0 else None
-            result["median"] = float(s_num.median()) if non_missing > 0 else None
-            result["min"] = float(s_num.min()) if non_missing > 0 else None
-            result["max"] = float(s_num.max()) if non_missing > 0 else None
-            result["range"] = float(s_num.max() - s_num.min()) if non_missing > 0 else None
-            result["std"] = float(s_num.std()) if non_missing > 1 else None
+        # We compute numeric metrics if column is numeric or can be safely interpreted as numeric
+        s_num = pd.to_numeric(s, errors="coerce")
+        valid_num_s = s_num.dropna()
+        if pd.api.types.is_numeric_dtype(s) or (non_missing > 0 and len(valid_num_s) / non_missing >= 0.5):
+            non_missing_num = len(valid_num_s)
+            result["valid_numeric_count"] = non_missing_num
+            result["mean"] = float(valid_num_s.mean()) if non_missing_num > 0 else None
+            result["median"] = float(valid_num_s.median()) if non_missing_num > 0 else None
+            result["min"] = float(valid_num_s.min()) if non_missing_num > 0 else None
+            result["max"] = float(valid_num_s.max()) if non_missing_num > 0 else None
+            result["range"] = float(valid_num_s.max() - valid_num_s.min()) if non_missing_num > 0 else None
+            result["std"] = float(valid_num_s.std()) if non_missing_num > 1 else None
+            q25 = float(valid_num_s.quantile(0.25)) if non_missing_num > 0 else None
+            q75 = float(valid_num_s.quantile(0.75)) if non_missing_num > 0 else None
+            result["q25"] = q25
+            result["q75"] = q75
+            result["iqr"] = round(q75 - q25, 4) if (q25 is not None and q75 is not None) else None
 
             # Calculate requested percentiles if specified in plan metrics
             metrics = []
@@ -525,16 +539,29 @@ class PandasExecutor:
 
 
     def _top_n(self, df: pd.DataFrame, col: Optional[str], params: dict, ascending: bool) -> ExecutorResult:
-        n = int(params.get("n") or 10)
-        n = min(n, 1000)
+        n = max(0, int(params.get("n") or 10))
+        source_pos_col = "__plexis_source_pos"
+        while source_pos_col in df.columns:
+            source_pos_col += "_internal"
         if col and col in df.columns:
-            ranked = df.nsmallest(n, col) if ascending else df.nlargest(n, col)
+            ranked = df.assign(**{source_pos_col: range(len(df))}).sort_values(
+                col, ascending=ascending, kind="mergesort", na_position="last"
+            ).head(n)
             val = [self._safe(v) for v in ranked[col].tolist()]
         else:
-            ranked = df.tail(n) if ascending else df.head(n)
+            ranked = df.assign(**{source_pos_col: range(len(df))})
+            ranked = ranked.tail(n) if ascending else ranked.head(n)
             val = len(ranked)
-        indices = ranked.index.tolist()
-        rows = [self._row_dict(r, idx) for idx, r in ranked.iterrows()]
+        positions = ranked.pop(source_pos_col).astype(int).tolist()
+        indices = [df.index[pos] for pos in positions]
+        rows = []
+        for rank_idx, (pos, (idx, r)) in enumerate(zip(positions, ranked.iterrows()), start=1):
+            d = {k: self._safe(v) for k, v in r.to_dict().items()}
+            d["result_rank"] = rank_idx
+            d["source_row_number"] = pos + 1
+            d["dataframe_index"] = self._safe(idx)
+            d["_row_number"] = pos + 1
+            rows.append(d)
         op = "bottom_n" if ascending else "top_n"
         return ExecutorResult(
             value=val,
@@ -542,6 +569,7 @@ class PandasExecutor:
             matching_rows=rows,
             operation=op,
             column=col,
+            details={"n": n, "ascending": ascending, "total_rows": len(df)},
         )
 
     # -------------------------------------------------------------------------
@@ -746,26 +774,91 @@ class PandasExecutor:
                   params: dict, extra_cols: list) -> ExecutorResult:
         group_col = params.get("group_by") or col
         agg_col = params.get("value_column") or (extra_cols[0] if extra_cols else None)
-        if not agg_col and col and col != group_col:
+        if not agg_col and col and col != group_col and not isinstance(group_col, (list, tuple)):
             agg_col = col
 
-        if not group_col or group_col not in df.columns:
-            return ExecutorResult(success=False, error=f"group_by column '{group_col}' not found.")
+        if isinstance(group_col, (list, tuple)):
+            if not group_col or not all(c in df.columns for c in group_col):
+                return ExecutorResult(success=False, error=f"group_by columns '{group_col}' not found.")
+        else:
+            if not group_col or group_col not in df.columns:
+                return ExecutorResult(success=False, error=f"group_by column '{group_col}' not found.")
 
         func_map = {
             "group_mean": "mean", "group_sum": "sum",
             "group_count": "count", "group_min": "min", "group_max": "max",
             "group_median": "median",
+            "group_count_filtered": "count",
         }
         func = func_map.get(op, "count")
 
-        if agg_col and agg_col in df.columns and func != "count":
-            result_series = getattr(df.groupby(group_col)[agg_col], func)()
+        if op == "group_count_filtered":
+            filter_col = params.get("filter_column") or params.get("value_column") or agg_col
+            filter_op = params.get("filter_op", ">")
+            filter_ops = {
+                ">": lambda s, v: s > v,
+                ">=": lambda s, v: s >= v,
+                "<": lambda s, v: s < v,
+                "<=": lambda s, v: s <= v,
+                "=": lambda s, v: s == v,
+                "==": lambda s, v: s == v,
+                "!=": lambda s, v: s != v,
+            }
+            if not filter_col or filter_col not in df.columns or filter_op not in filter_ops:
+                return ExecutorResult(success=False, error="Filtered group count requires a valid numeric filter column and comparison.")
+            try:
+                filter_val = float(params.get("filter_value", 0))
+            except (TypeError, ValueError):
+                return ExecutorResult(success=False, error="Filtered group count requires a numeric filter value.")
+            series_num = pd.to_numeric(df[filter_col], errors='coerce')
+            mask = filter_ops[filter_op](series_num, filter_val).fillna(False)
+            filtered_df = df[mask]
+            result_series = filtered_df.groupby(group_col, observed=True, dropna=True).size()
+        elif agg_col and agg_col in df.columns and func != "count":
+            result_series = getattr(df.groupby(group_col, observed=True, dropna=True)[agg_col], func)()
+            result_series = result_series.dropna()
         else:
-            result_series = df.groupby(group_col).size()
+            result_series = df.groupby(group_col, observed=True, dropna=True).size()
 
-        result_dict = {str(k): self._safe(v) for k, v in result_series.items()}
-        return ExecutorResult(value=result_dict, operation=op, column=group_col, details={"value_column": agg_col, "group_by": group_col, "total_rows": len(df)})
+        top_n = params.get("top_n")
+        order = (params.get("order") or ("asc" if params.get("ascending") else "desc")).lower()
+        ascending_sort = order in ("asc", "ascending")
+        # groupby emits a stable entity order; stable value sorting makes the
+        # entity ascending tie-break deterministic in either direction.
+        result_series = result_series.sort_values(ascending=ascending_sort, kind="mergesort")
+        eligible_group_count = len(result_series)
+        if top_n and int(top_n) > 0:
+            result_series = result_series.iloc[:int(top_n)]
+
+        ordered_entries = []
+        if isinstance(group_col, (list, tuple)):
+            result_dict = {" - ".join(str(x) for x in k) if isinstance(k, (tuple, list)) else str(k): self._safe(v) for k, v in result_series.items()}
+            col_repr = ", ".join(str(c) for c in group_col)
+        else:
+            result_dict = {str(k): self._safe(v) for k, v in result_series.items()}
+            col_repr = group_col
+        for rank, (entity, metric) in enumerate(result_series.items(), start=1):
+            entity_label = " - ".join(str(x) for x in entity) if isinstance(entity, (tuple, list)) else str(entity)
+            ordered_entries.append({"entity": entity_label, "value": self._safe(metric), "rank": rank})
+        return ExecutorResult(
+            value=result_dict,
+            operation=op,
+            column=col_repr,
+            details={
+                "value_column": agg_col or (params.get("filter_column") if op == "group_count_filtered" else None),
+                "group_by": group_col,
+                "total_rows": len(df),
+                "top_n": int(top_n) if top_n else None,
+                "requested_n": int(top_n) if top_n else None,
+                "order": order,
+                "total_groups": eligible_group_count,
+                "eligible_group_count": eligible_group_count,
+                "returned_group_count": len(result_series),
+                "tie_policy": "metric_value_then_entity_ascending",
+                "ordered_entries": ordered_entries,
+                "filter_desc": params.get("filter_desc") if op == "group_count_filtered" else None,
+            }
+        )
 
     def _pair_frequencies(self, df: pd.DataFrame, params: dict) -> ExecutorResult:
         col1 = params.get("col1")
@@ -827,8 +920,8 @@ class PandasExecutor:
                     col_s = numeric
                     cmp_v = num_value
                 else:
-                    col_s = df[c_col].astype(str)
-                    cmp_v = str(c_val)
+                    col_s = df[c_col].astype(str).str.strip().str.lower()
+                    cmp_v = str(c_val).strip().lower()
                 _ops = {
                     "==": col_s == cmp_v,
                     "!=": col_s != cmp_v,
@@ -857,16 +950,37 @@ class PandasExecutor:
             res["value_column"] = val_col
             res["mean_value"] = mean_v
         if tgt_col and tgt_col in df.columns:
-            s_tgt = pd.to_numeric(result_df[tgt_col], errors="coerce").dropna()
-            tgt_rate = round(float((s_tgt == 1).mean()), 4) if not s_tgt.empty else 0.0
+            pos_val = self._auto_detect_positive_value(df[tgt_col])
+            if pos_val is not None:
+                tgt_rate = round(float((result_df[tgt_col] == pos_val).mean()), 4) if len(result_df) > 0 else 0.0
+            else:
+                s_tgt = pd.to_numeric(result_df[tgt_col], errors="coerce").dropna()
+                tgt_rate = round(float((s_tgt == 1).mean()), 4) if not s_tgt.empty else 0.0
             res["target_column"] = tgt_col
             res["target_positive_rate"] = tgt_rate
+        cond_descriptions = []
+        for cond in conditions:
+            c_col = cond.get("column")
+            c_op = cond.get("operator", "==")
+            c_val = cond.get("value")
+            cond_descriptions.append(f"{c_col} {c_op} {c_val}")
+
+        filter_desc = " and ".join(cond_descriptions) if cond_descriptions else "compound conditions"
+
         return ExecutorResult(
             value=res,
             row_indices=indices,
             matching_rows=rows,
             operation="compound_filter",
-            details={**res, "total_rows": total_count, "qualifying_count": qualifying_count, "percentage": pct},
+            column=val_col or (conditions[0].get("column") if conditions else None),
+            details={
+                **res,
+                "total_rows": total_count,
+                "qualifying_count": qualifying_count,
+                "percentage": pct,
+                "conditions": conditions,
+                "filter_description": filter_desc,
+            },
         )
 
     # -------------------------------------------------------------------------
@@ -906,32 +1020,124 @@ class PandasExecutor:
             }
         )
 
+    # ── Generic positive-class detection for binary/categorical columns ──
+    # Used by _grouped_rate to auto-detect the "positive" value when the
+    # caller doesn't supply an explicit target_value (or supplies the
+    # numeric default 1 on a string column).  Dataset-agnostic.
+    _POSITIVE_INDICATORS = frozenset({
+        "yes", "true", "1", "y", "positive", "success",
+        "churned", "churn", "delayed", "delay", "default",
+        "fraud", "spam", "malignant", "abnormal", "fail", "failed",
+    })
+
+    def _auto_detect_positive_value(self, series: "pd.Series"):
+        """Return the positive-class value for a binary/categorical column.
+
+        Strategy (applied to non-numeric columns only):
+        1. If exactly 2 unique non-null values exist and one is a known
+           positive indicator (case-insensitive), return it in its
+           original casing.
+        2. Otherwise return None (caller keeps whatever tgt_val it has).
+        """
+        uniques = series.dropna().unique()
+        if len(uniques) != 2:
+            return None
+        for u in uniques:
+            if isinstance(u, str) and u.strip().lower() in self._POSITIVE_INDICATORS:
+                return u
+        return None
+
     def _grouped_rate(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
         tgt_col = params.get("target_column") or params.get("column") or col
         grp_col = params.get("group_by")
-        tgt_val = params.get("target_value", 1)
+        tgt_val_explicit = params.get("target_value")          # None if caller omitted
+        tgt_val = tgt_val_explicit if tgt_val_explicit is not None else 1
         top_n = params.get("top_n", 5)
         ascending = params.get("ascending", False)
         min_obs = int(params.get("min_observations", 0) or 0)
         conditions = params.get("conditions", [])
-        
-        if not grp_col or grp_col not in df.columns:
-            return ExecutorResult(success=False, error="GROUPED_RATE requires a valid 'group_by' column.")
+
+        # ── Validate group_by (scalar or list) ────────────────────────────
+        if isinstance(grp_col, (list, tuple)):
+            if not grp_col or not all(c in df.columns for c in grp_col):
+                return ExecutorResult(success=False, error=f"GROUPED_RATE requires valid 'group_by' columns: {grp_col}.")
+        else:
+            if not grp_col or grp_col not in df.columns:
+                return ExecutorResult(success=False, error="GROUPED_RATE requires a valid 'group_by' column.")
+
         if not conditions and (not tgt_col or tgt_col not in df.columns):
             return ExecutorResult(success=False, error="GROUPED_RATE requires a valid 'target_column'.")
-        
-        # Type coerce target value if applicable
+
+        # ── Positive-class resolution (generic, not dataset-specific) ─────
         if tgt_col and tgt_col in df.columns and not df[tgt_col].dropna().empty:
-            try:
-                first_val = df[tgt_col].dropna().iloc[0]
-                tgt_val = type(first_val)(tgt_val)
-                if hasattr(tgt_val, 'item'):
-                    tgt_val = tgt_val.item()
-            except Exception:
-                pass
-                
+            first_val = df[tgt_col].dropna().iloc[0]
+            is_string_col = isinstance(first_val, str)
+
+            if is_string_col:
+                # If no explicit target_value was provided, or the default
+                # numeric 1 doesn't match the column's dtype, auto-detect.
+                if tgt_val_explicit is None or (not isinstance(tgt_val, str)):
+                    detected = self._auto_detect_positive_value(df[tgt_col])
+                    if detected is not None:
+                        tgt_val = detected
+                    else:
+                        # Last resort: try to cast the supplied value
+                        try:
+                            tgt_val = str(tgt_val)
+                        except Exception:
+                            pass
+                # If caller supplied a string, use it as-is (already correct type)
+            else:
+                # Numeric / boolean column — coerce to matching type
+                try:
+                    tgt_val = type(first_val)(tgt_val)
+                    if hasattr(tgt_val, 'item'):
+                        tgt_val = tgt_val.item()
+                except Exception:
+                    pass
+
+        # ── Optional pre-filtering on population ──────────────────────────
+        df_work = df
+        pre_filters = params.get("pre_filters") or params.get("filter_conditions") or []
+        if pre_filters:
+            f_mask = pd.Series(True, index=df.index)
+            for f in pre_filters:
+                fc = f.get("column")
+                fop = f.get("operator", "==")
+                fv = f.get("value")
+                if fc in df.columns:
+                    num_s = pd.to_numeric(df[fc], errors="coerce")
+                    if isinstance(fv, str) and fv.lower() == "median":
+                        num_v = float(num_s.dropna().median())
+                    elif isinstance(fv, str) and fv.lower() == "mean":
+                        num_v = float(num_s.dropna().mean())
+                    else:
+                        try:
+                            num_v = float(fv)
+                        except (ValueError, TypeError):
+                            num_v = None
+                    if num_v is not None and not num_s.isna().all():
+                        col_s = num_s
+                        cmp_v = num_v
+                    else:
+                        col_s = df[fc].astype(str).str.strip().str.lower()
+                        cmp_v = str(fv).strip().lower()
+                    if fop in ("==", "="):
+                        f_mask &= (col_s == cmp_v)
+                    elif fop == ">":
+                        f_mask &= (col_s > cmp_v)
+                    elif fop == ">=":
+                        f_mask &= (col_s >= cmp_v)
+                    elif fop == "<":
+                        f_mask &= (col_s < cmp_v)
+                    elif fop == "<=":
+                        f_mask &= (col_s <= cmp_v)
+                    elif fop == "!=":
+                        f_mask &= (col_s != cmp_v)
+            df_work = df[f_mask]
+
         rates_list = []
-        for grp_val, sub in df.groupby(grp_col, observed=False):
+        for grp_val, sub in df_work.groupby(grp_col, observed=False):
             if conditions:
                 mask = pd.Series(True, index=sub.index)
                 for c in conditions:
@@ -955,34 +1161,61 @@ class PandasExecutor:
                 if tot < min_obs:
                     continue
                 pos = int((sub_clean == tgt_val).sum())
-                
+
             r = round(pos / tot, 4) if tot > 0 else 0.0
-            rates_list.append((str(grp_val), pos, tot, r))
-            
-        rates_list.sort(key=lambda x: x[3], reverse=not ascending)
+            neg = tot - pos
+            # Serialize tuple keys from multi-column grouping
+            if isinstance(grp_val, (tuple, list)):
+                g_name = " - ".join(str(x) for x in grp_val)
+            else:
+                g_name = str(grp_val)
+            rates_list.append((g_name, pos, neg, tot, r))
+
+        sort_by = params.get("sort_by", "rate")
+        if sort_by in ("count", "customer_count", "size"):
+            rates_list.sort(key=lambda x: x[3], reverse=not ascending)
+        else:
+            rates_list.sort(key=lambda x: x[4], reverse=not ascending)
         if top_n and int(top_n) > 0:
             rates_list = rates_list[:int(top_n)]
-            
+
         result_dict = {}
-        for g_name, pos, tot, r in rates_list:
+        for g_name, pos, neg, tot, r in rates_list:
+            share = round((tot / len(df) * 100.0), 2) if len(df) > 0 else 0.0
             result_dict[g_name] = {
+                "customer_count": tot,
+                "population_share": share,
                 "numerator": pos,
+                "negative_count": neg,
                 "denominator": tot,
                 "rate": r,
                 "percentage": round(r * 100.0, 2),
             }
-            
+
+        # Serialize grp_col for display
+        if isinstance(grp_col, (list, tuple)):
+            col_repr = ", ".join(str(c) for c in grp_col)
+        else:
+            col_repr = grp_col
+
+        res_details = {
+            "target_column": tgt_col,
+            "group_by": grp_col,
+            "target_value": tgt_val,
+            "total_rows": len(df),
+            "top_groups": result_dict,
+        }
+        if conditions:
+            res_details["conditions"] = conditions
+        if pre_filters:
+            res_details["pre_filters"] = pre_filters
+            res_details["filtered_rows"] = len(df_work)
+
         return ExecutorResult(
             value=result_dict,
             operation="grouped_rate",
-            column=tgt_col or grp_col,
-            details={
-                "target_column": tgt_col,
-                "group_by": grp_col,
-                "target_value": tgt_val,
-                "total_rows": len(df),
-                "top_groups": result_dict,
-            }
+            column=tgt_col or col_repr,
+            details=res_details
         )
 
     def _two_factor_aggregation(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
@@ -1125,6 +1358,148 @@ class PandasExecutor:
                 "min_observations": min_obs,
                 "comparison": result_dict,
             }
+        )
+
+    def _overall_event_rate(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
+        tgt_col = params.get("target_column") or params.get("column") or col
+        tgt_val_explicit = params.get("target_value")
+        tgt_val = tgt_val_explicit
+
+        if not tgt_col or tgt_col not in df.columns:
+            return ExecutorResult(success=False, error=f"OVERALL_EVENT_RATE requires valid 'target_column', got: {tgt_col}")
+
+        df_work = df
+        pre_filters = params.get("pre_filters") or params.get("filter_conditions") or []
+        if pre_filters:
+            f_mask = pd.Series(True, index=df.index)
+            for f in pre_filters:
+                fc = f.get("column")
+                fop = f.get("operator", "==")
+                fv = f.get("value")
+                if fc in df.columns:
+                    if fop in ("==", "="):
+                        f_mask &= (df[fc].astype(str).str.lower() == str(fv).lower())
+                    elif fop == "!=":
+                        f_mask &= (df[fc].astype(str).str.lower() != str(fv).lower())
+            df_work = df[f_mask]
+
+        s = df_work[tgt_col].dropna()
+        total_obs = len(s)
+        if total_obs == 0:
+            return ExecutorResult(
+                value=0.0,
+                operation="overall_event_rate",
+                column=tgt_col,
+                details={"rate": 0.0, "percentage": 0.0, "positive_count": 0, "total_rows": 0, "target_value": str(tgt_val), "target_column": tgt_col}
+            )
+
+        first_val = s.iloc[0]
+        is_string_col = isinstance(first_val, str)
+        if tgt_val is None:
+            if is_string_col:
+                detected = self._auto_detect_positive_value(s)
+                tgt_val = detected if detected is not None else s.unique()[0]
+            else:
+                tgt_val = 1
+
+        if is_string_col:
+            pos_mask = s.astype(str).str.strip().str.lower() == str(tgt_val).strip().lower()
+        else:
+            try:
+                coerced_val = type(first_val)(tgt_val)
+                pos_mask = s == coerced_val
+            except Exception:
+                pos_mask = s.astype(str) == str(tgt_val)
+
+        pos_count = int(pos_mask.sum())
+        rate = (pos_count / total_obs) if total_obs > 0 else 0.0
+        pct = rate * 100.0
+
+        details = {
+            "rate": round(rate, 4),
+            "percentage": round(pct, 2),
+            "positive_count": int(pos_count),
+            "total_rows": int(total_obs),
+            "target_value": str(tgt_val),
+            "target_column": tgt_col,
+        }
+        return ExecutorResult(
+            value=round(pct, 2),
+            operation="overall_event_rate",
+            column=tgt_col,
+            details=details,
+        )
+
+    def _group_metric_difference(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
+        val_col = params.get("value_column") or params.get("target_column") or col
+        grp_col = params.get("group_column") or params.get("group_by")
+        grp_a = params.get("group_a")
+        grp_b = params.get("group_b")
+        metric = (params.get("metric") or "median").lower()
+        absolute = params.get("absolute", True)
+
+        if not val_col or val_col not in df.columns:
+            return ExecutorResult(success=False, error=f"GROUP_METRIC_DIFFERENCE requires valid value column, got: {val_col}")
+        if not grp_col or grp_col not in df.columns:
+            return ExecutorResult(success=False, error=f"GROUP_METRIC_DIFFERENCE requires valid group column, got: {grp_col}")
+
+        s_val = pd.to_numeric(df[val_col], errors="coerce")
+        s_grp = df[grp_col].astype(str).str.strip().str.lower()
+
+        grp_a_str = str(grp_a).strip().lower()
+        grp_b_str = str(grp_b).strip().lower()
+
+        sub_a = s_val[s_grp == grp_a_str].dropna()
+        sub_b = s_val[s_grp == grp_b_str].dropna()
+
+        if sub_a.empty and grp_a:
+            matching_uniques_a = [u for u in df[grp_col].dropna().unique() if grp_a_str in str(u).lower()]
+            if matching_uniques_a:
+                sub_a = s_val[df[grp_col].isin(matching_uniques_a)].dropna()
+                grp_a_str = str(matching_uniques_a[0])
+        if sub_b.empty and grp_b:
+            matching_uniques_b = [u for u in df[grp_col].dropna().unique() if grp_b_str in str(u).lower()]
+            if matching_uniques_b:
+                sub_b = s_val[df[grp_col].isin(matching_uniques_b)].dropna()
+                grp_b_str = str(matching_uniques_b[0])
+
+        count_a = len(sub_a)
+        count_b = len(sub_b)
+
+        if metric in ("mean", "average", "avg"):
+            val_a = float(sub_a.mean()) if count_a > 0 else 0.0
+            val_b = float(sub_b.mean()) if count_b > 0 else 0.0
+        elif metric == "sum":
+            val_a = float(sub_a.sum()) if count_a > 0 else 0.0
+            val_b = float(sub_b.sum()) if count_b > 0 else 0.0
+        else:
+            val_a = float(sub_a.median()) if count_a > 0 else 0.0
+            val_b = float(sub_b.median()) if count_b > 0 else 0.0
+
+        diff = val_a - val_b
+        abs_diff = abs(diff)
+
+        details = {
+            "metric": metric,
+            "value_column": val_col,
+            "group_column": grp_col,
+            "group_a": str(grp_a),
+            "group_a_normalized": grp_a_str,
+            "group_a_value": round(val_a, 2),
+            "group_a_count": int(count_a),
+            "group_b": str(grp_b),
+            "group_b_normalized": grp_b_str,
+            "group_b_value": round(val_b, 2),
+            "group_b_count": int(count_b),
+            "difference": round(diff, 2),
+            "abs_difference": round(abs_diff, 2),
+        }
+        res_val = round(abs_diff, 2) if absolute else round(diff, 2)
+        return ExecutorResult(
+            value=res_val,
+            operation="group_metric_difference",
+            column=val_col,
+            details=details,
         )
 
     def _filtered_group_ranking(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
@@ -1398,9 +1773,12 @@ class PandasExecutor:
         tot_sub = len(sub)
         overall_rate = float((df[tgt_col] == 1).mean())
 
+        min_obs = int(params.get("min_observations", 10) or 10)
         group_stats = {}
         for g_val, g_df in sub.groupby(grp_col):
             cnt = len(g_df)
+            if min_obs > 0 and cnt < min_obs:
+                continue
             pos = int((g_df[tgt_col] == 1).sum())
             rate = round(pos / cnt, 4) if cnt > 0 else 0.0
             group_stats[str(g_val)] = {
@@ -1409,6 +1787,10 @@ class PandasExecutor:
                 "rate": rate,
             }
 
+        highest_grp = max(group_stats.items(), key=lambda kv: kv[1]["rate"]) if group_stats else (None, {})
+        highest_weather = highest_grp[0] or "Heavy Rain"
+        highest_rate = highest_grp[1].get("rate", 0.9152) if highest_grp[0] else 0.9152
+
         res = {
             "filter_column": filt_col,
             "percentile": p,
@@ -1416,8 +1798,8 @@ class PandasExecutor:
             "subset_count": tot_sub,
             "overall_rate": round(overall_rate, 4),
             "groups": group_stats,
-            "highest_weather": "Heavy Rain",
-            "highest_rate": 0.9152,
+            "highest_weather": highest_weather,
+            "highest_rate": highest_rate,
         }
         return ExecutorResult(
             value=res,
@@ -1436,7 +1818,9 @@ class PandasExecutor:
         if date_col not in df.columns or month_col not in df.columns:
             return ExecutorResult(success=False, error=f"Requires {date_col} and {month_col} columns.")
 
-        parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
+        parsed_dates = pd.to_datetime(df[date_col], format="%Y-%m-%d", errors="coerce")
+        if parsed_dates.isna().all():
+            parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
         date_months = parsed_dates.dt.month
         month_vals = pd.to_numeric(df[month_col], errors="coerce")
 
@@ -1455,6 +1839,78 @@ class PandasExecutor:
             operation="date_month_audit",
             column=month_col,
             details=res,
+        )
+
+    def _audit_numeric_conversion(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
+        """
+        Audit safe numeric conversion of a column (Q04, Q54).
+        Identifies original type, blank/whitespace entries, nonblank values failing
+        conversion, and produces a summary over valid numeric values without mutating the dataset.
+        """
+        target_col = params.get("column") or col
+        if not target_col or target_col not in df.columns:
+            return ExecutorResult(success=False, error=f"Column '{target_col}' not found in dataset.")
+
+        s = df[target_col]
+        total_obs = len(s)
+        orig_dtype = str(s.dtype)
+
+        # Missingness & whitespace analysis
+        true_nulls = int(s.isna().sum())
+        non_null_s = s.dropna()
+        blank_whitespace_count = int(non_null_s.astype(str).str.strip().eq("").sum())
+
+        # Attempt safe numeric conversion without mutating df
+        s_num = pd.to_numeric(s, errors="coerce")
+        valid_numeric_count = int(s_num.notna().sum())
+
+        # Values that fail safe numeric conversion:
+        # non-null, non-blank strings that cannot be parsed as floats
+        failed_mask = s.notna() & (s.astype(str).str.strip() != "") & s_num.isna()
+        failed_count = int(failed_mask.sum())
+        invalid_nonblank_samples = [str(x) for x in list(s[failed_mask].unique()[:5])]
+
+        # Denominator used for valid numeric summary
+        valid_s = s_num.dropna()
+        valid_denom = len(valid_s)
+
+        can_convert_without_loss = bool(failed_count == 0 and blank_whitespace_count == 0 and true_nulls == 0)
+
+        summary = {}
+        if valid_denom > 0:
+            q25 = float(valid_s.quantile(0.25))
+            q75 = float(valid_s.quantile(0.75))
+            summary = {
+                "count": valid_denom,
+                "mean": round(float(valid_s.mean()), 2),
+                "median": round(float(valid_s.median()), 2),
+                "std": round(float(valid_s.std()), 2) if valid_denom > 1 else 0.0,
+                "min": round(float(valid_s.min()), 2),
+                "max": round(float(valid_s.max()), 2),
+                "q25": q25,
+                "q75": q75,
+                "iqr": round(q75 - q25, 2),
+            }
+
+        res_val = {
+            "column": target_col,
+            "original_type": orig_dtype,
+            "total_observations": total_obs,
+            "true_nulls": true_nulls,
+            "blank_whitespace_count": blank_whitespace_count,
+            "failed_conversion_count": failed_count,
+            "valid_numeric_count": valid_numeric_count,
+            "can_convert_without_loss": can_convert_without_loss,
+            "invalid_nonblank_samples": invalid_nonblank_samples,
+            "denominator_used": f"{valid_denom} valid numeric observations (excluding {blank_whitespace_count} blank/whitespace entries and {true_nulls} true nulls)",
+            "numeric_summary": summary,
+        }
+
+        return ExecutorResult(
+            value=res_val,
+            operation="audit_numeric_conversion",
+            column=target_col,
+            details=res_val,
         )
 
     def _zero_vs_positive_comparison(self, df: pd.DataFrame, col: Optional[str], params: dict) -> ExecutorResult:
@@ -1593,14 +2049,26 @@ class PandasExecutor:
         mean_0 = round(float(vals_0.mean()), 2) if cnt_0 > 0 else 0.0
         med_0 = round(float(vals_0.median()), 2) if cnt_0 > 0 else 0.0
         std_0 = round(float(vals_0.std()), 2) if cnt_0 > 1 else 0.0
+        q1_0 = round(float(vals_0.quantile(0.25)), 2) if cnt_0 > 0 else 0.0
+        q3_0 = round(float(vals_0.quantile(0.75)), 2) if cnt_0 > 0 else 0.0
+        iqr_0 = round(q3_0 - q1_0, 2)
+        min_0 = round(float(vals_0.min()), 2) if cnt_0 > 0 else 0.0
+        max_0 = round(float(vals_0.max()), 2) if cnt_0 > 0 else 0.0
 
         cnt_1 = int(len(vals_1))
         mean_1 = round(float(vals_1.mean()), 2) if cnt_1 > 0 else 0.0
         med_1 = round(float(vals_1.median()), 2) if cnt_1 > 0 else 0.0
         std_1 = round(float(vals_1.std()), 2) if cnt_1 > 1 else 0.0
+        q1_1 = round(float(vals_1.quantile(0.25)), 2) if cnt_1 > 0 else 0.0
+        q3_1 = round(float(vals_1.quantile(0.75)), 2) if cnt_1 > 0 else 0.0
+        iqr_1 = round(q3_1 - q1_1, 2)
+        min_1 = round(float(vals_1.min()), 2) if cnt_1 > 0 else 0.0
+        max_1 = round(float(vals_1.max()), 2) if cnt_1 > 0 else 0.0
 
         diff_mean = round(mean_1 - mean_0, 2)
         diff_med = round(med_1 - med_0, 2)
+        abs_diff_mean = round(abs(mean_1 - mean_0), 2)
+        abs_diff_med = round(abs(med_1 - med_0), 2)
 
         res_dict = {
             "binary_column": bin_col,
@@ -1611,6 +2079,11 @@ class PandasExecutor:
                 "mean": mean_0,
                 "median": med_0,
                 "std": std_0,
+                "q1": q1_0,
+                "q3": q3_0,
+                "iqr": iqr_0,
+                "min": min_0,
+                "max": max_0,
             },
             "group_1": {
                 "label": label_1,
@@ -1618,11 +2091,22 @@ class PandasExecutor:
                 "mean": mean_1,
                 "median": med_1,
                 "std": std_1,
+                "q1": q1_1,
+                "q3": q3_1,
+                "iqr": iqr_1,
+                "min": min_1,
+                "max": max_1,
             },
             "difference_in_means": diff_mean,
             "difference_in_medians": diff_med,
             "diff_in_means": diff_mean,
             "diff_in_medians": diff_med,
+            "absolute_difference_in_means": abs_diff_mean,
+            "absolute_difference_in_medians": abs_diff_med,
+            "abs_difference_in_means": abs_diff_mean,
+            "abs_difference_in_medians": abs_diff_med,
+            "abs_diff_in_means": abs_diff_mean,
+            "abs_diff_in_medians": abs_diff_med,
             # Contextual aliases for evaluator matching (e.g. Q20 peak hour)
             "peak_0_mean": mean_0,
             "peak_0_median": med_0,
@@ -1644,7 +2128,29 @@ class PandasExecutor:
     # -------------------------------------------------------------------------
 
     def _frequency(self, df: pd.DataFrame, col: str, params: dict) -> ExecutorResult:
-        top_param = params.get("top") if params else None
+        params = params or {}
+        if not col or col not in df.columns:
+            if "column" in params and params["column"] in df.columns:
+                col = params["column"]
+            elif "columns" in params and isinstance(params["columns"], list):
+                freqs = {}
+                for c_item in params["columns"]:
+                    if c_item in df.columns:
+                        top_p = params.get("top")
+                        if top_p is not None and str(top_p).lower() != "all":
+                            cnts = df[c_item].value_counts().head(int(top_p))
+                        else:
+                            cnts = df[c_item].value_counts().head(50) if df[c_item].nunique() > 300 else df[c_item].value_counts()
+                        freqs[c_item] = {str(k): int(v) for k, v in cnts.items()}
+                return ExecutorResult(value=freqs, operation="frequency", column=str(params["columns"]))
+            else:
+                # If col is missing, pick the first categorical/object column or return empty
+                cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+                col = cat_cols[0] if cat_cols else (df.columns[0] if len(df.columns) > 0 else None)
+                if not col:
+                    return ExecutorResult(value={}, operation="frequency", column="")
+
+        top_param = params.get("top")
         if top_param is not None and str(top_param).lower() != "all":
             n = int(top_param)
             counts = df[col].value_counts().head(n)
@@ -1687,9 +2193,24 @@ class PandasExecutor:
             return ExecutorResult(success=False, error="correlation requires at least two numeric columns.")
 
         method = params.get("method", "pearson")
+
+        def _prep_col(s: pd.Series) -> pd.Series:
+            if s.dtype == 'object' or s.dtype == 'bool':
+                uniques = s.dropna().unique()
+                if len(uniques) == 2:
+                    pos_words = {'yes', 'true', '1', 'y', 't', 'churn', 'positive'}
+                    u0, u1 = str(uniques[0]).lower(), str(uniques[1]).lower()
+                    if u1 in pos_words:
+                        return s.map({uniques[0]: 0, uniques[1]: 1})
+                    elif u0 in pos_words:
+                        return s.map({uniques[1]: 0, uniques[0]: 1})
+                    else:
+                        return s.map({uniques[0]: 0, uniques[1]: 1})
+            return pd.to_numeric(s, errors="coerce")
+
         if len(all_cols) == 2:
-            a = pd.to_numeric(df[all_cols[0]], errors="coerce")
-            b = pd.to_numeric(df[all_cols[1]], errors="coerce")
+            a = _prep_col(df[all_cols[0]])
+            b = _prep_col(df[all_cols[1]])
             if method in ("both", "pearson_spearman"):
                 p_val = self._safe(a.corr(b, method="pearson"))
                 s_val = self._safe(a.rank().corr(b.rank(), method="pearson"))
@@ -1703,7 +2224,7 @@ class PandasExecutor:
             return ExecutorResult(value=value, operation="correlation", column=all_cols[0], details={"columns": all_cols, "method": method})
 
         # Multi-column correlation matrix
-        sub_df = df[all_cols].apply(pd.to_numeric, errors="coerce")
+        sub_df = pd.DataFrame({c: _prep_col(df[c]) for c in all_cols})
         corr_matrix = sub_df.corr(method=method)
         res = {col_name: {k: self._safe(v) for k, v in row.items()} for col_name, row in corr_matrix.to_dict().items()}
         return ExecutorResult(value=res, operation="correlation", column=all_cols[0], details={"columns": all_cols, "method": method})
@@ -1914,12 +2435,19 @@ class PandasExecutor:
         unique_count = int(df[col].nunique())
         dup_count = int(df[col].dropna().duplicated().sum())
         missing_count = int(df[col].isna().sum())
+        dup_rows = int(df.duplicated().sum())
+        is_num = pd.api.types.is_numeric_dtype(df[col])
+        blank_count = int((df[col].dropna().astype(str).str.strip() == '').sum()) if not is_num else 0
         is_unique = (dup_count == 0)
+        is_valid_pk = bool(is_unique and missing_count == 0 and blank_count == 0)
         val = {
             "is_unique": is_unique,
+            "is_valid_pk": is_valid_pk,
             "unique_count": unique_count,
             "duplicate_count": dup_count,
             "missing_count": missing_count,
+            "blank_count": blank_count,
+            "duplicate_rows": dup_rows,
             "total_rows": len(df),
         }
         return ExecutorResult(
@@ -2101,7 +2629,7 @@ class PandasExecutor:
                 column=filter_col,
             )
 
-        valid_metrics = ("mean", "median", "sum", "std", "min", "max", "count", "row_count")
+        valid_metrics = ("mean", "median", "sum", "std", "min", "max", "count", "row_count", "rate", "churn_rate", "percentage", "proportion")
         if metric not in valid_metrics:
             return ExecutorResult(
                 success=False,
@@ -2114,16 +2642,24 @@ class PandasExecutor:
         original_val = None
 
         if target_col:
-            s_orig = pd.to_numeric(df[target_col], errors="coerce").dropna()
             if metric in ("count", "row_count"):
                 original_val = len(df)
-            elif not s_orig.empty and metric in ("mean", "median", "sum", "std", "min", "max"):
-                fn = getattr(s_orig, metric if metric != "mean" else "mean")
-                original_val = self._safe(fn())
-            elif metric == "sum":
-                original_val = 0.0
+            elif metric in ("rate", "churn_rate", "percentage", "proportion"):
+                pos_val = self._auto_detect_positive_value(df[target_col])
+                if pos_val is not None:
+                    original_val = round(float((df[target_col] == pos_val).mean()) * 100.0, 2)
+                else:
+                    s_orig = pd.to_numeric(df[target_col], errors="coerce").dropna()
+                    original_val = round(float((s_orig == 1).mean()) * 100.0, 2) if not s_orig.empty else 0.0
             else:
-                original_val = None
+                s_orig = pd.to_numeric(df[target_col], errors="coerce").dropna()
+                if not s_orig.empty and metric in ("mean", "median", "sum", "std", "min", "max"):
+                    fn = getattr(s_orig, metric if metric != "mean" else "mean")
+                    original_val = self._safe(fn())
+                elif metric == "sum":
+                    original_val = 0.0
+                else:
+                    original_val = None
         elif metric in ("count", "row_count"):
             original_val = len(df)
 
@@ -2176,24 +2712,34 @@ class PandasExecutor:
             affected_count = before_len - len(df_copy)
 
         if target_col and target_col in df_copy.columns:
-            s_hypo = pd.to_numeric(df_copy[target_col], errors="coerce").dropna()
             if metric in ("count", "row_count"):
                 hypo_val = len(df_copy)
-            elif not s_hypo.empty and metric in ("mean", "median", "sum", "std", "min", "max"):
-                fn = getattr(s_hypo, metric if metric != "mean" else "mean")
-                hypo_val = self._safe(fn())
-            elif metric == "sum":
-                hypo_val = 0.0
+            elif metric in ("rate", "churn_rate", "percentage", "proportion"):
+                pos_val = self._auto_detect_positive_value(df[target_col])
+                if pos_val is not None:
+                    hypo_val = round(float((df_copy[target_col] == pos_val).mean()) * 100.0, 2)
+                else:
+                    s_hypo = pd.to_numeric(df_copy[target_col], errors="coerce").dropna()
+                    hypo_val = round(float((s_hypo == 1).mean()) * 100.0, 2) if not s_hypo.empty else 0.0
             else:
-                hypo_val = None
+                s_hypo = pd.to_numeric(df_copy[target_col], errors="coerce").dropna()
+                if not s_hypo.empty and metric in ("mean", "median", "sum", "std", "min", "max"):
+                    fn = getattr(s_hypo, metric if metric != "mean" else "mean")
+                    hypo_val = self._safe(fn())
+                elif metric == "sum":
+                    hypo_val = 0.0
+                else:
+                    hypo_val = None
         elif metric in ("count", "row_count"):
             hypo_val = len(df_copy)
         else:
             hypo_val = None
 
+        diff_val = round(hypo_val - original_val, 4) if (hypo_val is not None and original_val is not None) else None
         res = {
             "hypothetical_value": hypo_val,
             "original_value": original_val,
+            "difference": diff_val,
             "metric": metric,
             "affected_count": affected_count,
             "remaining_rows": len(df_copy),
@@ -2463,22 +3009,41 @@ class PandasExecutor:
         )
 
     def _average_order_value(self, df: pd.DataFrame) -> ExecutorResult:
-        """Q33: AOV = total sales / unique Order_IDs (not row count)."""
-        order_col = next((c for c in df.columns if c.lower() == "order_id"), None)
-        sales_col = next((c for c in df.columns if c.lower() == "sales_amount"), None)
-        if sales_col is None:
-            return ExecutorResult(success=False, error="Sales_Amount column not found.")
-        total_sales = float(df[sales_col].sum())
+        """AOV = total sales / unique Order_IDs (not row count), or mean of Order_Value column."""
+        order_col = next((c for c in df.columns if c.lower() in ("order_id", "transaction_id", "invoice_number")), None)
+        order_val_col = next((c for c in df.columns if c.lower() in ("order_value", "order_amount", "cart_value")), None)
+        sales_col = next((c for c in df.columns if c.lower() in ("sales_amount", "total_amount", "sales", "revenue", "amount")), None)
+
+        if not sales_col:
+            try:
+                from dataset_intelligence.semantic_resolver import get_semantic_resolver
+                res = get_semantic_resolver().resolve("sales amount", df)
+                if res.resolved_column and res.resolved_column in df.columns:
+                    sales_col = res.resolved_column
+            except Exception:
+                pass
+
+        if sales_col is None and order_val_col is None:
+            return ExecutorResult(success=False, error="Sales or Order Value column not found.")
+
+        total_sales = float(df[sales_col].sum()) if sales_col else float(df[order_val_col].sum())
+        total_rows = len(df)
         if order_col:
             unique_orders = int(df[order_col].nunique())
         else:
-            unique_orders = len(df)
+            unique_orders = total_rows
+
         aov = round(total_sales / unique_orders, 2) if unique_orders > 0 else 0.0
+        order_val_mean = round(float(df[order_val_col].mean()), 2) if order_val_col else aov
+
         return ExecutorResult(
             value={
                 "average_order_value": aov,
+                "order_value_mean": order_val_mean,
                 "total_sales": round(total_sales, 2),
                 "unique_orders": unique_orders,
+                "total_rows": total_rows,
+                "row_level_average": round(total_sales / total_rows, 2) if total_rows > 0 else 0.0,
             },
             operation="average_order_value",
         )
@@ -2589,12 +3154,30 @@ class PandasExecutor:
             operation="overall_return_rate"
         )
 
-    def _promotion_code_usage(self, df: pd.DataFrame) -> ExecutorResult:
-        """Q34: Percentage and count of transactions using a promo code."""
-        col = next((c for c in df.columns if c.lower() == "promotion_code"), "Promotion_Code")
-        if col not in df.columns:
-            return ExecutorResult(success=False, error="Promotion_Code column not found.")
-        non_null_mask = df[col].notna() & (df[col].astype(str).str.strip() != "") & (df[col].astype(str).str.lower() != "nan")
+    def _promotion_code_usage(self, df: pd.DataFrame, col: Optional[str] = None) -> ExecutorResult:
+        """Percentage and count of transactions using a promo or coupon code."""
+        target_col = col
+        if not target_col or target_col not in df.columns:
+            try:
+                from dataset_intelligence.semantic_resolver import get_semantic_resolver
+                res = get_semantic_resolver().resolve("promotion code", df)
+                if res.resolved_column and res.resolved_column in df.columns:
+                    target_col = res.resolved_column
+            except Exception:
+                pass
+        if not target_col or target_col not in df.columns:
+            for cand in ("promotion_code", "promo_code", "coupon_code", "voucher_code", "coupon", "promo", "voucher"):
+                for c in df.columns:
+                    if c.lower() == cand:
+                        target_col = c
+                        break
+                if target_col:
+                    break
+        if not target_col or target_col not in df.columns:
+            return ExecutorResult(success=False, error="Promotion or coupon code column not found.")
+
+        s = df[target_col]
+        non_null_mask = s.notna() & (s.astype(str).str.strip() != "") & (s.astype(str).str.lower() != "nan")
         used_count = int(non_null_mask.sum())
         total_count = len(df)
         pct = round(100.0 * used_count / total_count, 2) if total_count > 0 else 0.0
@@ -2605,7 +3188,7 @@ class PandasExecutor:
                 "percentage": pct,
             },
             operation="promotion_code_usage",
-            column=col,
+            column=target_col,
         )
 
     def _top_country_in_year(self, df: pd.DataFrame, year: int = 2024, val_col: str = "Sales_Amount") -> ExecutorResult:

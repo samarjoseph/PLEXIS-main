@@ -252,87 +252,22 @@ export default function SpreadsheetToolbar({
 
         </div>
 
-        {/* ── Right side ── */}
+        {/* ── Right side: clean, essential MVP controls only ── */}
         <div className="ssg-toolbar__right">
 
-          {/* Ask Agent input — primary AI interaction */}
-          <div className={`ssg-ask-agent${isAiLoading ? ' ssg-ask-agent--loading' : ''}`}>
-            <PlexisLogo width={13} height={13} className="ssg-ask-agent__icon" />
-            <input
-              ref={agentInputRef}
-              type="text"
-              className="ssg-ask-agent__input"
-              placeholder={isAiLoading ? 'Thinking…' : 'Ask Plexis about this data…'}
-              value={agentInput}
-              onChange={e => setAgentInput(e.target.value)}
-              onKeyDown={handleAgentKeyDown}
-              disabled={isAiLoading}
-              aria-label="Ask Plexis AI agent"
-              id="ssg-ask-agent-input"
-            />
-            {agentInput && !isAiLoading && (
-              <button
-                type="button"
-                className="ssg-ask-agent__send"
-                onClick={handleAgentSubmit}
-                aria-label="Send query to Plexis"
-                title="Send (Enter)"
-              >
-                <ArrowUp size={12} />
-              </button>
-            )}
-          </div>
-
-          {/* AI Mode toggle */}
-          <button
-            type="button"
-            className={`ssg-ai-mode-btn${aiModeEnabled ? ' ssg-ai-mode-btn--active' : ''}`}
-            onClick={onToggleAiMode}
-            title={aiModeEnabled ? 'AI Mode ON — Plexis controls the workspace' : 'Enable AI Mode'}
-            aria-pressed={aiModeEnabled}
-          >
-            <PlexisLogo width={12} height={12} />
-            {aiModeEnabled ? 'AI ON' : 'AI Mode'}
-          </button>
-
-          <div className="ssg-toolbar__sep" />
-
-          {/* View mode switcher */}
-          <button
-            type="button"
-            className={`ssg-view-btn${viewMode === 'side_by_side' ? ' ssg-view-btn--active' : ''}`}
-            onClick={() => onViewModeChange?.('side_by_side')}
-            title="Side-by-side view"
-            aria-pressed={viewMode === 'side_by_side'}
-          >
-            <LayoutPanelLeft size={13} />
-          </button>
-          <button
-            type="button"
-            className={`ssg-view-btn${viewMode === 'popup' ? ' ssg-view-btn--active' : ''}`}
-            onClick={() => onViewModeChange?.('popup')}
-            title="Popup view"
-            aria-pressed={viewMode === 'popup'}
-          >
-            <Maximize2 size={13} />
-          </button>
-
-          {/* Copy button */}
+          {/* Copy button (active when cell or rows are selected) */}
           {(selectedRows?.size > 0 || activeCell) && (
-            <>
-              <div className="ssg-toolbar__sep" />
-              <button
-                type="button"
-                className={`ssg-toolbar__btn${copyFlash ? ' ssg-toolbar__btn--copied' : ''}`}
-                onClick={onCopy}
-                title="Copy selection (Ctrl+C)"
-              >
-                {copyFlash ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-            </>
+            <button
+              type="button"
+              className={`ssg-toolbar__btn${copyFlash ? ' ssg-toolbar__btn--copied' : ''}`}
+              onClick={onCopy}
+              title="Copy selection (Ctrl+C)"
+            >
+              {copyFlash ? <Check size={14} /> : <Copy size={14} />}
+            </button>
           )}
 
-          {/* Find (Ctrl+F) */}
+          {/* Find in dataset (Ctrl+F) */}
           <button
             type="button"
             className="ssg-toolbar__btn"
@@ -346,7 +281,9 @@ export default function SpreadsheetToolbar({
           {/* Loading indicator */}
           {isLoading && <RefreshCw size={14} className="ssg-spinner" />}
 
-          {/* Close button */}
+          <div className="ssg-toolbar__sep" />
+
+          {/* Close button — strictly preserved */}
           <button
             type="button"
             className="ssg-toolbar__btn ssg-toolbar__btn--danger"

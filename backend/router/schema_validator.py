@@ -78,6 +78,7 @@ SUPPORTED_OPERATIONS = {
     "GROUP_SUM",
     "GROUP_MEAN",
     "GROUP_COUNT",
+    "GROUP_COUNT_FILTERED",
     "GROUP_MIN",
     "GROUP_MAX",
     "PAIR_FREQUENCIES",
@@ -130,6 +131,7 @@ SUPPORTED_OPERATIONS = {
     "MEDIAN_SPLIT_COMPARISON",
     "TAIL_RISK_GROUP_RATE",
     "DATE_MONTH_AUDIT",
+    "AUDIT_NUMERIC_CONVERSION",
 }
 
 # ── Generic token taxonomy: distinguishing columns, metrics, and aliases ──────
@@ -188,6 +190,69 @@ VALID_ORDERS = {"asc", "desc", "ascending", "descending"}
 
 # Valid aggregate functions
 VALID_AGGREGATE_FUNCS = {"mean", "median", "std", "sum", "count", "min", "max"}
+
+
+def _clean_col_token(val) -> str:
+    """Safely normalizes a column reference that may be a str, list, tuple, or None."""
+    if val is None:
+        return ""
+    if isinstance(val, (list, tuple)):
+        return _clean_col_token(val[0]) if val else ""
+    return str(val).strip().lower()
+
+
+def _lookup_col(cname, col_lookup: dict) -> Optional[dict]:
+    """Look up column with casing, hyphen, space, and underscore tolerance."""
+    if not cname:
+        return None
+    c = str(cname).strip().lower()
+    if c in col_lookup:
+        return col_lookup[c]
+    stripped = c.replace("_", "").replace("-", "").replace(" ", "")
+    if stripped in col_lookup:
+        return col_lookup[stripped]
+    with_underscores = c.replace("-", "_").replace(" ", "_")
+    if with_underscores in col_lookup:
+        return col_lookup[with_underscores]
+    with_spaces = c.replace("_", " ").replace("-", " ")
+    if with_spaces in col_lookup:
+        return col_lookup[with_spaces]
+    return None
+
+
+def is_derived_metric_for_column(metric_str: str, col_lookup: dict) -> bool:
+    """
+    Check if a metric string is a valid derived metric for an existing column.
+    Handles forms like:
+      <col>_rate, <col>_percentage, <col>_ratio, <col>_prop, <col>_proportion,
+      <col>_mean, <col>_avg, <col>_count, <col>_sum, <col>_median, <col>_std,
+      rate_of_<col>, percentage_of_<col>, avg_<col>, mean_<col>
+    """
+    if not metric_str:
+        return False
+    m = str(metric_str).lower().strip()
+    if m in RANKING_DERIVED_ALIASES or m in ROW_COUNT_ALIASES or m in TARGET_RATE_ALIASES:
+        return True
+
+    suffixes = (
+        "_rate", "_percentage", "_pct", "_ratio", "_proportion", "_prop",
+        "_mean", "_avg", "_average", "_count", "_sum", "_median", "_std",
+        "_diff", "_difference", "_quartile", "_decile"
+    )
+    for sfx in suffixes:
+        if m.endswith(sfx):
+            prefix = m[:-len(sfx)].strip("_")
+            if prefix in col_lookup or _lookup_col(prefix, col_lookup):
+                return True
+
+    prefixes = ("rate_of_", "percentage_of_", "pct_of_", "avg_", "mean_")
+    for pfx in prefixes:
+        if m.startswith(pfx):
+            suffix = m[len(pfx):].strip("_")
+            if suffix in col_lookup or _lookup_col(suffix, col_lookup):
+                return True
+
+    return False
 
 
 @dataclass
@@ -261,7 +326,21 @@ class SchemaValidator:
             )
 
         # Build column lookup {name_lower: col_dict}
-        col_lookup = {c.get("name", "").lower(): c for c in columns}
+        col_lookup = {}
+        for c in columns:
+            name = c.get("name", "")
+            lower_name = name.lower()
+            col_lookup[lower_name] = c
+            stripped = lower_name.replace("_", "").replace("-", "").replace(" ", "")
+            if stripped not in col_lookup:
+                col_lookup[stripped] = c
+            with_spaces = lower_name.replace("_", " ").replace("-", " ")
+            if with_spaces not in col_lookup:
+                col_lookup[with_spaces] = c
+            with_underscores = lower_name.replace("-", "_").replace(" ", "_")
+            if with_underscores not in col_lookup:
+                col_lookup[with_underscores] = c
+
         if "route" not in col_lookup:
             has_orig = any("origin" in c for c in col_lookup)
             has_dest = any("dest" in c for c in col_lookup)
@@ -275,7 +354,7 @@ class SchemaValidator:
                 # Default to all columns for FIND_MISSING; first column for FIND_DUPLICATES
                 operation = {**operation, "columns": []}
                 return ValidationResult(valid=True, corrected_operation=operation)
-            invalid = [c for c in cols if c.lower() not in col_lookup]
+            invalid = [c for c in cols if not _lookup_col(c, col_lookup)]
             if invalid:
                 return ValidationResult(
                     valid=False,
@@ -285,11 +364,12 @@ class SchemaValidator:
                         f"Available: {[c.get('name') for c in columns[:20]]}"
                     ),
                 )
-            return ValidationResult(valid=True)
+            corrected_cols = [_lookup_col(c, col_lookup)["name"] for c in cols]
+            return ValidationResult(valid=True, corrected_operation={**operation, "columns": corrected_cols})
 
         if op_type == "CORRELATION":
-            col_a = (operation.get("column_a") or "").lower()
-            col_b = (operation.get("column_b") or "").lower()
+            col_a = _clean_col_token(operation.get("column_a") or "")
+            col_b = _clean_col_token(operation.get("column_b") or "")
             for cname, label in [(col_a, "column_a"), (col_b, "column_b")]:
                 if not cname:
                     return ValidationResult(
@@ -297,105 +377,168 @@ class SchemaValidator:
                         error_code="MISSING_COLUMN",
                         error_message=f"CORRELATION requires '{label}'.",
                     )
-                if cname not in col_lookup:
+                entry = _lookup_col(cname, col_lookup)
+                if not entry:
                     return ValidationResult(
                         valid=False,
                         error_code="COLUMN_NOT_FOUND",
                         error_message=f"Column '{cname}' not found for CORRELATION.",
                     )
-                if col_lookup[cname].get("type") != "numeric":
+                if entry.get("type") != "numeric":
                     return ValidationResult(
                         valid=False,
                         error_code="TYPE_MISMATCH",
-                        error_message=f"CORRELATION requires numeric columns; '{cname}' is {col_lookup[cname].get('type')}.",
+                        error_message=f"CORRELATION requires numeric columns; '{cname}' is {entry.get('type')}.",
                     )
             return ValidationResult(valid=True)
 
         # ── Grouping operations ───────────────────────────────────────────────
-        if op_type in {"GROUP_MEAN", "GROUP_SUM", "GROUP_COUNT", "GROUP_MEDIAN", "GROUP_MIN", "GROUP_MAX"}:
-            grp_raw = (operation.get("column") or operation.get("group_col") or operation.get("group_by") or "").strip().lower()
-            if not grp_raw:
-                return ValidationResult(
-                    valid=False,
-                    error_code="MISSING_COLUMN",
-                    error_message=f"Operation {op_type} requires a grouping column.",
-                )
-            if grp_raw not in col_lookup:
-                return ValidationResult(
-                    valid=False,
-                    error_code="COLUMN_NOT_FOUND",
-                    error_message=f"Column '{grp_raw}' not found in dataset. Available columns: {[c.get('name') for c in columns[:20]]}",
-                )
-            corrected = {**operation, "column": col_lookup[grp_raw]["name"]}
-            val_raw = (operation.get("value_column") or operation.get("val_col") or "").strip().lower()
+        if op_type in {"GROUP_MEAN", "GROUP_SUM", "GROUP_COUNT",
+    "GROUP_COUNT_FILTERED", "GROUP_MEDIAN", "GROUP_MIN", "GROUP_MAX"}:
+            grp_val = operation.get("column") or operation.get("group_col") or operation.get("group_by") or ""
+            val_raw = _clean_col_token(operation.get("value_column") or operation.get("val_col") or "")
+
+            if isinstance(grp_val, (list, tuple)):
+                grp_list = [str(x).strip().lower() for x in grp_val if x]
+                if not grp_list:
+                    return ValidationResult(
+                        valid=False,
+                        error_code="MISSING_COLUMN",
+                        error_message=f"Operation {op_type} requires a grouping column.",
+                    )
+                resolved_grp_names = []
+                for g in grp_list:
+                    entry = _lookup_col(g, col_lookup)
+                    if not entry:
+                        return ValidationResult(
+                            valid=False,
+                            error_code="COLUMN_NOT_FOUND",
+                            error_message=f"Column '{g}' not found in dataset. Available columns: {[c.get('name') for c in columns[:20]]}",
+                        )
+                    resolved_grp_names.append(entry["name"])
+                corrected = {**operation, "column": resolved_grp_names, "group_by": resolved_grp_names}
+            else:
+                grp_raw = str(grp_val).strip().lower()
+                if not grp_raw:
+                    return ValidationResult(
+                        valid=False,
+                        error_code="MISSING_COLUMN",
+                        error_message=f"Operation {op_type} requires a grouping column.",
+                    )
+                entry = _lookup_col(grp_raw, col_lookup)
+                if not entry:
+                    return ValidationResult(
+                        valid=False,
+                        error_code="COLUMN_NOT_FOUND",
+                        error_message=f"Column '{grp_raw}' not found in dataset. Available columns: {[c.get('name') for c in columns[:20]]}",
+                    )
+                corrected = {**operation, "column": entry["name"], "group_by": entry["name"]}
+
             if val_raw:
-                if val_raw not in col_lookup:
+                val_entry = _lookup_col(val_raw, col_lookup)
+                if not val_entry:
                     return ValidationResult(
                         valid=False,
                         error_code="COLUMN_NOT_FOUND",
                         error_message=f"Value column '{val_raw}' not found in dataset.",
                     )
-                corrected["value_column"] = col_lookup[val_raw]["name"]
-                if op_type in {"GROUP_MEAN", "GROUP_SUM", "GROUP_MEDIAN"} and col_lookup[val_raw].get("type") not in ("numeric", "unknown"):
+                corrected["value_column"] = val_entry["name"]
+
+                # Automatically adapt GROUP_MEAN on categorical/binary target to GROUPED_RATE
+                if op_type == "GROUP_MEAN" and val_entry.get("type") in ("categorical", "string", "boolean", "text"):
+                    corrected = {
+                        "type": "GROUPED_RATE",
+                        "target_column": val_entry["name"],
+                        "group_by": corrected.get("group_by", corrected.get("column")),
+                        "column": val_entry["name"],
+                        "top_n": operation.get("top_n", 0),
+                    }
+                    return ValidationResult(valid=True, corrected_operation=corrected)
+
+                if op_type in {"GROUP_MEAN", "GROUP_SUM", "GROUP_MEDIAN"} and val_entry.get("type") not in ("numeric", "unknown"):
                     return ValidationResult(
                         valid=False,
                         error_code="TYPE_MISMATCH",
-                        error_message=f"Operation {op_type} requires a numeric value column, but '{val_raw}' is type '{col_lookup[val_raw].get('type')}'.",
+                        error_message=f"Operation {op_type} requires a numeric value column, but '{val_raw}' is type '{val_entry.get('type')}'.",
                     )
             return ValidationResult(valid=True, corrected_operation=corrected)
 
         # ── Multi-dimensional grouping & grouped target rates (Cluster A) ─────
         if op_type == "CROSSTAB":
-            c1_raw = (operation.get("column") or operation.get("col1") or "").strip().lower()
-            c2_raw = (operation.get("group_by") or operation.get("col2") or "").strip().lower()
+            c1_raw = _clean_col_token(operation.get("column") or operation.get("col1") or "")
+            c2_raw = _clean_col_token(operation.get("group_by") or operation.get("col2") or "")
             if not c1_raw or not c2_raw:
                 return ValidationResult(
                     valid=False,
                     error_code="MISSING_COLUMN",
                     error_message="CROSSTAB requires both 'column' and 'group_by' columns.",
                 )
-            if c1_raw not in col_lookup:
+            c1_entry = _lookup_col(c1_raw, col_lookup)
+            c2_entry = _lookup_col(c2_raw, col_lookup)
+            if not c1_entry:
                 return ValidationResult(
                     valid=False,
                     error_code="COLUMN_NOT_FOUND",
                     error_message=f"Column '{c1_raw}' not found in dataset for CROSSTAB.",
                 )
-            if c2_raw not in col_lookup:
+            if not c2_entry:
                 return ValidationResult(
                     valid=False,
                     error_code="COLUMN_NOT_FOUND",
                     error_message=f"Group column '{c2_raw}' not found in dataset for CROSSTAB.",
                 )
-            corrected = {**operation, "column": col_lookup[c1_raw]["name"], "group_by": col_lookup[c2_raw]["name"]}
+            corrected = {**operation, "column": c1_entry["name"], "group_by": c2_entry["name"]}
             return ValidationResult(valid=True, corrected_operation=corrected)
 
         if op_type == "GROUPED_RATE":
-            tgt_raw = (operation.get("target_column") or operation.get("column") or "").strip().lower()
-            grp_raw = (operation.get("group_by") or operation.get("group_col") or "").strip().lower()
-            if not tgt_raw or not grp_raw:
+            tgt_raw = _clean_col_token(operation.get("target_column") or operation.get("column") or "")
+            grp_val = operation.get("group_by") or operation.get("group_col") or ""
+            if not tgt_raw or not grp_val:
                 return ValidationResult(
                     valid=False,
                     error_code="MISSING_COLUMN",
                     error_message="GROUPED_RATE requires both 'target_column' and 'group_by' columns.",
                 )
-            if tgt_raw not in col_lookup:
+            tgt_entry = _lookup_col(tgt_raw, col_lookup)
+            if not tgt_entry:
                 return ValidationResult(
                     valid=False,
                     error_code="COLUMN_NOT_FOUND",
                     error_message=f"Target column '{tgt_raw}' not found in dataset for GROUPED_RATE.",
                 )
-            if grp_raw not in col_lookup:
-                return ValidationResult(
-                    valid=False,
-                    error_code="COLUMN_NOT_FOUND",
-                    error_message=f"Group column '{grp_raw}' not found in dataset for GROUPED_RATE.",
-                )
-            corrected = {
-                **operation,
-                "target_column": col_lookup[tgt_raw]["name"],
-                "column": col_lookup[tgt_raw]["name"],
-                "group_by": col_lookup[grp_raw]["name"]
-            }
+            if isinstance(grp_val, (list, tuple)):
+                grp_list = [str(x).strip().lower() for x in grp_val if x]
+                resolved_names = []
+                for g in grp_list:
+                    entry = _lookup_col(g, col_lookup)
+                    if not entry:
+                        return ValidationResult(
+                            valid=False,
+                            error_code="COLUMN_NOT_FOUND",
+                            error_message=f"Group column '{g}' not found in dataset for GROUPED_RATE.",
+                        )
+                    resolved_names.append(entry["name"])
+                corrected = {
+                    **operation,
+                    "target_column": tgt_entry["name"],
+                    "column": tgt_entry["name"],
+                    "group_by": resolved_names
+                }
+            else:
+                grp_raw = str(grp_val).strip().lower()
+                grp_entry = _lookup_col(grp_raw, col_lookup)
+                if not grp_entry:
+                    return ValidationResult(
+                        valid=False,
+                        error_code="COLUMN_NOT_FOUND",
+                        error_message=f"Group column '{grp_raw}' not found in dataset for GROUPED_RATE.",
+                    )
+                corrected = {
+                    **operation,
+                    "target_column": tgt_entry["name"],
+                    "column": tgt_entry["name"],
+                    "group_by": grp_entry["name"]
+                }
             return ValidationResult(valid=True, corrected_operation=corrected)
 
         if op_type == "TWO_FACTOR_AGGREGATION":
@@ -705,16 +848,17 @@ class SchemaValidator:
 
         # ── Ranking / Sorting operations ──────────────────────────────────────
         if op_type in {"TOP_N", "BOTTOM_N", "SORT_ROWS", "SORT"}:
-            raw_c = (operation.get("column") or operation.get("by") or "").strip().lower()
+            raw_c = _clean_col_token(operation.get("column") or operation.get("by") or "")
             if not raw_c:
                 return ValidationResult(
                     valid=False,
                     error_code="MISSING_COLUMN",
                     error_message=f"Operation {op_type} requires a 'column' parameter.",
                 )
-            if raw_c in col_lookup:
-                corrected = {**operation, "column": col_lookup[raw_c]["name"]}
-            elif raw_c in RANKING_DERIVED_ALIASES:
+            entry = _lookup_col(raw_c, col_lookup)
+            if entry:
+                corrected = {**operation, "column": entry["name"]}
+            elif is_derived_metric_for_column(raw_c, col_lookup):
                 corrected = {**operation, "column": raw_c}
             else:
                 return ValidationResult(
@@ -822,6 +966,22 @@ class SchemaValidator:
                     error_message="FILTER requires a 'column' parameter.",
                 )
             if raw_c not in col_lookup:
+                metric_aliases = {"count", "row_count", "rows", "frequency", "size", "n", "rate", "percentage", "proportion"}
+                if raw_c.lower() in metric_aliases:
+                    operator = operation.get("operator")
+                    if operator not in VALID_FILTER_OPERATORS:
+                        return ValidationResult(
+                            valid=False,
+                            error_code="INVALID_OPERATOR",
+                            error_message=f"Filter operator '{operator}' is not valid. Use: {', '.join(sorted(VALID_FILTER_OPERATORS))}",
+                        )
+                    if operation.get("value") is None:
+                        return ValidationResult(
+                            valid=False,
+                            error_code="MISSING_PARAMETER",
+                            error_message="FILTER requires a 'value' parameter.",
+                        )
+                    return ValidationResult(valid=True, corrected_operation=operation)
                 return ValidationResult(
                     valid=False,
                     error_code="COLUMN_NOT_FOUND",
@@ -844,7 +1004,7 @@ class SchemaValidator:
             return ValidationResult(valid=True, corrected_operation=corrected)
 
         # ── Single-column operations (standard fallback) ──────────────────────
-        col_name = (operation.get("column") or "").strip().lower()
+        col_name = _clean_col_token(operation.get("column") or "")
         if not col_name and op_type not in NO_COLUMN_REQUIRED_OPS:
             return ValidationResult(
                 valid=False,
@@ -852,7 +1012,8 @@ class SchemaValidator:
                 error_message=f"Operation {op_type} requires a 'column' parameter.",
             )
 
-        if col_name and col_name not in col_lookup:
+        col_entry = _lookup_col(col_name, col_lookup) if col_name else None
+        if col_name and not col_entry:
             return ValidationResult(
                 valid=False,
                 error_code="COLUMN_NOT_FOUND",
@@ -862,7 +1023,7 @@ class SchemaValidator:
                 ),
             )
 
-        col_info = col_lookup.get(col_name, {})
+        col_info = col_entry or {}
         col_type = col_info.get("type", "unknown")
 
         # ── Type compatibility ────────────────────────────────────────────────

@@ -58,11 +58,15 @@ def build_system_prompt(
     if plan:
         sections.append(plan.to_guidance())
 
-    # Closing instruction
+    # Closing instruction — strict zero thinking / process leakage
     sections.append(
         "Now respond. The context below tells you what the user said and what has happened "
-        "in this conversation. Use your reasoning, your identity, and your judgment. "
-        "Do not perform routing. Do not explain your reasoning process. Just respond as Plexis."
+        "in this conversation. Use your reasoning, your identity, and your judgment.\n"
+        "CRITICAL STRICT DIRECTIVE:\n"
+        "- Respond directly to the user as Plexis.\n"
+        "- Output ONLY the final user-facing response.\n"
+        "- NEVER output any chain-of-thought, thinking process, reasoning steps, or prompt analysis (e.g. do NOT write 'Here\'s a thinking process:', 'Analyze User Input:', or quote 'The system note says').\n"
+        "- Never include <think>, <thought>, or similar reasoning tags.\n        - NEVER output Python scripts or tutorial code (e.g. import pandas as pd, df.to_csv(...)). Plexis directly executes transformations on the dataset in-platform.\n        - NEVER guess or invent column names that are not in the dataset schema."
     )
 
     return "\n\n".join(sections)

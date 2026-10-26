@@ -16,7 +16,9 @@ export default function TransformationClarificationCard({ clarification, onActio
   const candidates = clarification?.candidate_columns || [];
   const needsColumnScope = clarification?.clarification_type === 'COLUMN_SCOPE';
   const isTypeMismatch = clarification?.clarification_type === 'VALUE_TYPE_MISMATCH';
-  const isAmbiguity = clarification?.clarification_type === 'VALUE_AMBIGUITY';
+  const isAmbiguity = clarification?.clarification_type === 'VALUE_AMBIGUITY' || clarification?.clarification_type === 'EXTREME_VALUE_AMBIGUITY' || clarification?.clarification_type === 'RANKING_AMBIGUITY';
+  const isRanking = clarification?.clarification_type === 'RANKING_AMBIGUITY';
+  const kickerLabel = clarification?.kicker || (isRanking ? 'RANKING INTENT CLARIFICATION' : 'TRANSFORMATION CLARIFICATION');
   
   const mismatchReq = clarification?.requested_value_info;
   const mismatchCand = clarification?.candidate_value_info;
@@ -29,7 +31,7 @@ export default function TransformationClarificationCard({ clarification, onActio
   const destination = literalLabel(clarification?.destination);
 
   const submit = (value, message, additionalPayload = {}) => onAction?.(message, {
-    type: 'TRANSFORMATION_CLARIFICATION',
+    type: isRanking ? 'RANKING_CLARIFICATION' : 'TRANSFORMATION_CLARIFICATION',
     clarification_type: clarification?.clarification_type,
     transformation_id: clarification?.transformation_id,
     value,
@@ -45,9 +47,9 @@ export default function TransformationClarificationCard({ clarification, onActio
   return (
     <section className="tcc-card" aria-labelledby={`tcc-title-${clarification?.transformation_id || 'active'}`}>
       <header className="tcc-header">
-        <div className="tcc-kicker"><ListChecks size={14} /> TRANSFORMATION CLARIFICATION</div>
+        <div className="tcc-kicker"><ListChecks size={14} /> {kickerLabel}</div>
         <p className="tcc-question" id={`tcc-title-${clarification?.transformation_id || 'active'}`}>
-          {clarification?.question || 'Where should I apply this transformation?'}
+          {clarification?.question || (isRanking ? 'How would you like to rank these records?' : 'Where should I apply this transformation?')}
         </p>
       </header>
 
@@ -76,14 +78,21 @@ export default function TransformationClarificationCard({ clarification, onActio
               key={idx}
               type="button"
               className="tcc-all-button"
-              style={{justifyContent: 'flex-start'}}
+              style={{justifyContent: 'flex-start', textAlign: 'left', padding: '10px 14px'}}
               onClick={() => {
-                submit('RESOLVE_AMBIGUITY', `I meant: ${opt.label}`, {
+                submit(opt.action || 'RESOLVE_AMBIGUITY', `I meant: ${opt.label}`, {
+                  action: opt.action,
+                  selected_action: opt.action,
+                  chosen_operation: opt.operation,
                   resolved_value_info: opt.value_info
                 });
               }}
             >
-              {opt.label} <code>{literalLabel(opt.value_info)}</code>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                <span style={{fontWeight: 600}}>{opt.label}</span>
+                {opt.description && <span style={{fontSize: '12px', opacity: 0.85}}>{opt.description}</span>}
+              </div>
+              {opt.value_info && <code>{literalLabel(opt.value_info)}</code>}
             </button>
           ))}
         </div>

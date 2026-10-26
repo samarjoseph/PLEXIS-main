@@ -40,6 +40,7 @@ import {
   HardDrive,
   Columns,
   Microscope,
+  Sparkles,
 } from 'lucide-react';
 import { exportChartAsPNG, exportChartDataAsCSV } from '../../utils/chartExport';
 import UITooltip from '../ui/Tooltip';
@@ -280,13 +281,21 @@ export default function AnalyticsPanelV2({
   if (collapsed) return null;
 
   return (
-    <motion.aside
-      className={`v2-analytics ${fullscreen ? 'v2-analytics-fullscreen' : ''}`}
-      initial={{ opacity: 0, x: '100%' }}
-      animate={{ opacity: 1, x: 0, width: fullscreen ? '100vw' : (isDesktop ? panelW : undefined) }}
-      exit={{ opacity: 0, x: '100%' }}
-      transition={isDragging ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-    >
+    <>
+      {!isDesktop && (
+        <div
+          className="v2-analytics-overlay visible"
+          onClick={onToggleCollapse}
+          aria-label="Close analytics overlay"
+        />
+      )}
+      <motion.aside
+        className={`v2-analytics ${fullscreen ? 'v2-analytics-fullscreen' : ''} ${!isDesktop ? 'v2-analytics--mobile' : ''}`}
+        initial={{ opacity: 0, x: '100%' }}
+        animate={{ opacity: 1, x: 0, width: fullscreen ? '100vw' : (isDesktop ? panelW : undefined) }}
+        exit={{ opacity: 0, x: '100%' }}
+        transition={isDragging ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      >
       {/* Drag Handle */}
       {isDesktop && !fullscreen && (
         <div
@@ -413,19 +422,26 @@ export default function AnalyticsPanelV2({
           )}
         </div>
 
-        {/* Charts */}
+        {/* Charts & Analytics */}
         <div className="v2-analytics-section">
-          <div className="v2-analytics-section-title">
-            <BarChart3 size={12} />
-            Active Charts
+          <div className="v2-analytics-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <BarChart3 size={12} />
+              Charts & Analytics
+            </span>
+            <span className="v2-coming-soon-chip">Under development</span>
           </div>
-          <div className="v2-chart-types">
+
+          <div className="v2-chart-types v2-chart-types--disabled" title="Chart visualizer controls are in development">
             {CHART_TYPES.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
-                className={`v2-chart-type-btn ${chartType === id ? 'active' : ''}`}
-                onClick={() => onChartTypeChange(id)}
+                className="v2-chart-type-btn v2-chart-type-btn--disabled"
+                disabled
+                aria-disabled="true"
+                tabIndex={-1}
+                title={`${label} charts under development`}
               >
                 <Icon size={14} />
                 {label}
@@ -442,12 +458,23 @@ export default function AnalyticsPanelV2({
                 options={options}
               />
             ) : (
-              <div className="v2-chart-empty">
-                <BarChart3 size={28} strokeWidth={1.5} color="var(--dash-dim)" />
-                <p style={{ fontWeight: 500, marginBottom: '4px' }}>No chart available</p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--dash-dim)', maxWidth: '220px', lineHeight: '1.5' }}>
-                  This dataset does not contain trend or sequence-based data suitable for visualization.
+              <div className="v2-chart-coming-soon">
+                <div className="v2-coming-soon-badge">
+                  <Sparkles size={11} className="v2-coming-soon-badge-icon" />
+                  <span>Coming Soon</span>
+                </div>
+                <div className="v2-coming-soon-icon-wrap">
+                  <BarChart3 size={28} strokeWidth={1.6} color="var(--dash-accent, #6366f1)" />
+                </div>
+                <h4 className="v2-coming-soon-title">Under development — Coming soon!</h4>
+                <p className="v2-coming-soon-desc">
+                  We're working on richer data visualizations. For now, explore your data and calculations directly in chat.
                 </p>
+                <div className="v2-coming-soon-features">
+                  <span className="v2-coming-soon-pill">Bar & Line Series</span>
+                  <span className="v2-coming-soon-pill">Category Aggregates</span>
+                  <span className="v2-coming-soon-pill">Visual Exports</span>
+                </div>
               </div>
             )}
           </div>
@@ -468,7 +495,7 @@ export default function AnalyticsPanelV2({
           ) : (
             <div className="v2-analytics-empty-section">
               <Lightbulb size={18} color="var(--dash-dim)" style={{ marginBottom: '4px' }} />
-              <p>Insights appear after data analysis</p>
+              <p>Automated visual insights will appear here when chart rendering launches.</p>
             </div>
           )}
         </div>
@@ -509,5 +536,6 @@ export default function AnalyticsPanelV2({
       </div>
       )} {/* end activeTab === 'analytics' */}
     </motion.aside>
+    </>
   );
 }

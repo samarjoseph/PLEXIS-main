@@ -122,9 +122,15 @@ class GroqProvider(IProviderAdapter):
 
         if request.json_mode:
             payload["response_format"] = {"type": "json_object"}
+            # Ensure "json" appears in messages as required by OpenAI/Groq API spec
+            if not any("json" in m.get("content", "").lower() for m in messages):
+                if messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += " Output must be a valid JSON object."
+                else:
+                    messages.insert(0, {"role": "system", "content": "Output must be a valid JSON object."})
 
         try:
-            response = requests.post(self.base_url, headers=headers, json=payload, timeout=60)
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=15)
 
             # Fast-fail on permanent errors (404 = model not found, 422 = bad model name)
             if response.status_code in _PERMANENT_FAILURE_CODES:
@@ -154,10 +160,20 @@ class GroqProvider(IProviderAdapter):
             data = response.json()
 
             latency_ms = (time.time() - start_time) * 1000
-            content = data["choices"][0]["message"]["content"]
+            choices = data.get("choices", [])
+            msg = choices[0].get("message", {}) if choices else {}
+            content = msg.get("content") or ""
+            if not content.strip():
+                reasoning = msg.get("reasoning")
+                if reasoning:
+                    content = str(reasoning).strip()
+
             usage = data.get("usage", {})
             input_tokens = usage.get("prompt_tokens", 0)
             output_tokens = usage.get("completion_tokens", 0)
+
+            success = bool(content.strip())
+            err_msg = None if success else f"Empty completion from Groq model {model_name}"
 
             return ProviderResponse(
                 text=content,
@@ -166,7 +182,9 @@ class GroqProvider(IProviderAdapter):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
-                success=True,
+                success=success,
+                error=err_msg,
+                status_code=200 if success else 502,
                 raw_response=data
             )
         except Exception as e:

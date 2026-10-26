@@ -474,6 +474,15 @@ class IRCompiler:
         elif op == 'CLIP':
             col = p['column']
             df[col] = df[col].clip(lower=p.get('min'), upper=p.get('max'))
+
+        elif op == 'UPDATE_EXTREMUM':
+            col = p['column']
+            extremum = p.get('extremum', 'max').lower()
+            new_val = p['new_value']
+            s = pd.to_numeric(df[col], errors='coerce')
+            curr_ext = s.max() if extremum == 'max' else s.min()
+            mask = (df[col] == curr_ext)
+            df.loc[mask, col] = new_val
             
         elif op == 'EXTRACT_DATE_PART':
             col = p['column']

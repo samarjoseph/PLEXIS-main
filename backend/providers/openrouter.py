@@ -73,9 +73,10 @@ class OpenRouterProvider(IProviderAdapter):
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
-                if request.system_prompt:
-                    messages.append({'role': 'system', 'content': request.system_prompt})
                 messages.append({'role': 'user', 'content': request.task})
+
+            if request.system_prompt and not any(m.get('role') == 'system' for m in messages):
+                messages.insert(0, {'role': 'system', 'content': request.system_prompt})
 
             headers = {
                 'Authorization': f'Bearer {effective_key}',
@@ -97,7 +98,7 @@ class OpenRouterProvider(IProviderAdapter):
                 body['response_format'] = {'type': 'json_object'}
 
             start_time = time.time()
-            response = requests.post(self.endpoint, headers=headers, json=body, timeout=60)
+            response = requests.post(self.endpoint, headers=headers, json=body, timeout=(3.0, 10.0))
             
             # Detect 429
             if response.status_code == 429:
@@ -119,11 +120,22 @@ class OpenRouterProvider(IProviderAdapter):
             latency_ms = (time.time() - start_time) * 1000
             
             data = response.json()
-            text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+            choices = data.get('choices', [])
+            msg = choices[0].get('message', {}) if choices else {}
+            raw_content = msg.get('content')
+            text = (raw_content or '').strip()
+            if not text:
+                reasoning = msg.get('reasoning')
+                if reasoning:
+                    text = str(reasoning).strip()
+
             usage = data.get('usage', {})
             input_tokens = usage.get('prompt_tokens', 0)
             output_tokens = usage.get('completion_tokens', 0)
             actual_model = data.get('model', model_name)
+
+            success = bool(text)
+            err_msg = None if success else f"Empty completion from OpenRouter model {model_name}"
 
             return ProviderResponse(
                 text=text,
@@ -132,8 +144,9 @@ class OpenRouterProvider(IProviderAdapter):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
-                success=True,
-                status_code=200,
+                success=success,
+                error=err_msg,
+                status_code=200 if success else 502,
                 headers=dict(response.headers),
                 raw_response=data
             )
@@ -160,9 +173,10 @@ class OpenRouterProvider(IProviderAdapter):
         try:
             messages = request.messages.copy() if request.messages else []
             if not messages and request.task:
-                if request.system_prompt:
-                    messages.append({'role': 'system', 'content': request.system_prompt})
                 messages.append({'role': 'user', 'content': request.task})
+
+            if request.system_prompt and not any(m.get('role') == 'system' for m in messages):
+                messages.insert(0, {'role': 'system', 'content': request.system_prompt})
 
             headers = {
                 'Authorization': f'Bearer {effective_key}',

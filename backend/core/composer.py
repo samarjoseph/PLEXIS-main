@@ -36,6 +36,15 @@ class ResponseComposer:
     def compose(self, context: ExecutionContext, result: EngineResult) -> EngineResult:
         # Conversation Engine handles its own generation — skip if not needed
         if not getattr(result, 'should_compose', True):
+            from verifier.answer_verifier import answer_verifier
+            v_res = answer_verifier.verify(
+                query=getattr(context, 'normalized_query', getattr(context, 'message', '')),
+                answer=result.answer,
+                facts=getattr(result, 'facts', None),
+                evidence=getattr(result, 'evidence', None),
+                context=context,
+            )
+            result.metadata['verification'] = v_res.to_dict()
             return result
 
         intent = getattr(context, 'intent', 'unknown')
@@ -98,8 +107,64 @@ class ResponseComposer:
         )
 
         if response.success:
-            result.answer = response.text
+            from utils.text_sanitizer import strip_thinking_and_internal_reasoning
+            clean_text = strip_thinking_and_internal_reasoning(response.text)
+            result.answer = clean_text
             result.provider = response.provider
+
+            # Grounding verification for analytical results:
+            from verifier.answer_verifier import answer_verifier, VerificationStatus
+            v_res = answer_verifier.verify(
+                query=message,
+                answer=response.text or "",
+                facts=facts,
+                evidence=evidence,
+                context=context,
+            )
+
+            if v_res.is_repaired and v_res.repaired_answer:
+                logger.info("[ResponseComposer] Composed text repaired by AnswerVerifier.")
+                result.answer = v_res.repaired_answer
+            elif v_res.status == VerificationStatus.FAIL:
+                computed = facts.get('computed_answer') if isinstance(facts, dict) else None
+                if computed and computed.strip():
+                    logger.warning(
+                        "[ResponseComposer] Composed text failed verification (%s). Falling back to verified engine narrative.",
+                        v_res.findings
+                    )
+                    result.answer = computed
+                else:
+                    fallback_parts = []
+                    if isinstance(facts, dict):
+                        ops = facts.get('operations', [])
+                        for op_i in ops:
+                            op_v = op_i.get('value')
+                            op_n = op_i.get('operation')
+                            if op_v is not None:
+                                fallback_parts.append(f"{op_n or 'metric'}: {op_v}")
+                    if fallback_parts:
+                        logger.warning(
+                            "[ResponseComposer] Composed text failed verification and no computed narrative available. Using structured fact fallback."
+                        )
+                        result.answer = "**Verified Analysis Result**:\n\n" + "\n".join(f"- {p}" for p in fallback_parts)
+                    else:
+                        logger.error("[ResponseComposer] Composed text failed verification and no authoritative facts available. Blocking corrupted draft.")
+                        result.answer = "The analysis completed, but the drafted response contained unverified claims and could not be verified against dataset evidence."
+                        result.success = False
+
+                if hasattr(result, 'evidence') and result.evidence:
+                    if hasattr(result.evidence, 'verified'):
+                        result.evidence.verified = False
+                    elif isinstance(result.evidence, list):
+                        for ev in result.evidence:
+                            if hasattr(ev, 'verified'):
+                                ev.verified = False
+                            elif isinstance(ev, dict):
+                                ev['verified'] = False
+                    elif isinstance(result.evidence, dict):
+                        result.evidence['verified'] = False
+
+            result.metadata['verification'] = v_res.to_dict()
 
             # Grounding verification for analytical results:
             # Ensure the composed response does not omit or contradict primary analytical values.
@@ -183,6 +248,22 @@ class ResponseComposer:
             value_str = str(int(value))
         else:
             value_str = str(value)
+
+        matching_rows = getattr(analytical_result, 'matching_rows', []) or []
+        dataset_name = getattr(context, 'dataset_filename', 'the dataset') or 'the dataset'
+        if (operation or '').lower() in ('max', 'min', 'idxmax', 'idxmin', 'longest', 'shortest', 'highest', 'lowest'):
+            from analytics.context_enrichment import enrich_extremum_narrative
+            details = getattr(analytical_result, 'details', {}) or {}
+            unit = details.get('unit')
+            return enrich_extremum_narrative(
+                op=operation,
+                col=column or 'value',
+                val=value_str,
+                matching_rows=matching_rows,
+                dataset_name=dataset_name,
+                details=details,
+                unit=unit,
+            )
 
         return f"The {op_word}{col_phrase} is **{value_str}**."
 

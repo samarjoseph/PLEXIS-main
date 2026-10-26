@@ -25,8 +25,9 @@ def _dedup_clean_keys(keys: List[str]) -> List[str]:
 class Config:
     """Application configuration."""
 
-    FLASK_PORT: int = int(os.environ.get("FLASK_PORT", "5000"))
-    FLASK_DEBUG: bool = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
+    FLASK_PORT: int = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", "5000")))
+    FLASK_DEBUG: bool = os.environ.get("FLASK_DEBUG", "false").lower() in ("true", "1")
+    SECRET_KEY: str = os.environ.get("SECRET_KEY", "plexis-secret-key-change-in-production-v2")
 
     # ── Role: Router ──────────────────────────────────────────────────────────
     MISTRAL_API_KEY: str = os.environ.get("MISTRAL_API_KEY", "").strip()
@@ -46,6 +47,9 @@ class Config:
         os.environ.get("GEMINI_API_KEY_2", ""),
         os.environ.get("GEMINI_API_KEY_3", ""),
         os.environ.get("GEMINI_API_KEY_4", ""),
+        os.environ.get("GEMINI_API_KEY_5", ""),
+        os.environ.get("GEMINI_API_KEY_6", ""),
+        os.environ.get("GEMINI_API_KEY_7", ""),
     ])
     TRANSFORMATION_GEMINI_MODEL: str = os.environ.get("TRANSFORMATION_GEMINI_MODEL", "gemini-2.5-flash").strip()
 
@@ -55,26 +59,29 @@ class Config:
         os.environ.get("OPENROUTER_API_KEY", ""),
         os.environ.get("OPENROUTER_API_KEY_2", ""),
         os.environ.get("OPENROUTER_API_KEY_3", ""),
+        os.environ.get("OPENROUTER_API_KEY_4", ""),
+        os.environ.get("OPENROUTER_API_KEY_5", ""),
+        os.environ.get("OPENROUTER_API_KEY_6", ""),
     ])
     OPENROUTER_FALLBACK_MODELS: str = os.environ.get(
-        "OPENROUTER_FALLBACK_MODELS", "nvidia/nemotron-3-super-120b-a12b:free"
+        "OPENROUTER_FALLBACK_MODELS", "nvidia/nemotron-3.5-lightning:free,google/gemma-2-27b-it:free"
     ).strip()
 
-    ANALYSIS_OPENROUTER_MODEL: str = os.environ.get("ANALYSIS_OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free").strip()
+    ANALYSIS_OPENROUTER_MODEL: str = os.environ.get("ANALYSIS_OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free").strip()
     ANALYSIS_OPENROUTER_FALLBACK_MODEL: str = os.environ.get(
-        "ANALYSIS_OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
+        "ANALYSIS_OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free"
     ).strip()
     ANALYSIS_GEMINI_MODEL: str = os.environ.get("ANALYSIS_GEMINI_MODEL", "gemini-2.5-flash").strip()
 
-    CONVERSATION_OPENROUTER_MODEL: str = os.environ.get("CONVERSATION_OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free").strip()
+    CONVERSATION_OPENROUTER_MODEL: str = os.environ.get("CONVERSATION_OPENROUTER_MODEL", "nvidia/nemotron-3.5-lightning:free").strip()
     CONVERSATION_OPENROUTER_FALLBACK_MODEL: str = os.environ.get(
-        "CONVERSATION_OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
+        "CONVERSATION_OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free"
     ).strip()
     CONVERSATION_GEMINI_MODEL: str = os.environ.get("CONVERSATION_GEMINI_MODEL", "gemini-2.5-flash").strip()
 
     # ── Optional/Legacy Providers ─────────────────────────────────────────────
     GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "").strip()
-    GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
+    GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
     GROQ_MODEL_FALLBACK: str = os.environ.get("GROQ_MODEL_FALLBACK", "openai/gpt-oss-120b").strip()
     GROQ_MODEL_HIGH_REASONING: str = os.environ.get("GROQ_MODEL_HIGH_REASONING", "openai/gpt-oss-120b").strip()
 
@@ -84,22 +91,29 @@ class Config:
 
     MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "100"))
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "DEBUG")
+    ENABLE_DUCKDB_ENGINE: bool = os.environ.get("ENABLE_DUCKDB_ENGINE", "true").lower() in ("true", "1", "yes")
 
-    # Parse comma-separated CORS origins into a list
+    # Parse comma-separated CORS origins into a list, combining configured origins with local dev
+    _DEFAULT_CORS = "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173"
+    _CONFIGURED_CORS = os.environ.get("CORS_ORIGINS", "").strip()
+    _COMBINED_CORS = f"{_DEFAULT_CORS},{_CONFIGURED_CORS}" if _CONFIGURED_CORS else _DEFAULT_CORS
     CORS_ORIGINS: List[str] = [
         origin.strip()
-        for origin in os.environ.get(
-            "CORS_ORIGINS", "http://localhost:5173,http://localhost:5174"
-        ).split(",")
+        for origin in _COMBINED_CORS.split(",")
         if origin.strip()
     ]
 
     UPLOAD_FOLDER: str = os.environ.get("UPLOAD_FOLDER", "storage/uploads")
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-    # PostgreSQL database URL
-    DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
-    DB_POOL_SIZE: int = int(os.environ.get("DB_POOL_SIZE", "10"))
+    # PostgreSQL database URL with postgres:// -> postgresql:// normalization for Supabase/Render
+    _RAW_DB_URL: str = os.environ.get("DATABASE_URL", "").strip()
+    DATABASE_URL: str = (
+        "postgresql://" + _RAW_DB_URL[len("postgres://"):]
+        if _RAW_DB_URL.startswith("postgres://")
+        else _RAW_DB_URL
+    )
+    DB_POOL_SIZE: int = int(os.environ.get("DB_POOL_SIZE", "25"))
 
     @classmethod
     def validate(cls) -> None:

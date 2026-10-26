@@ -144,10 +144,32 @@ class AnalysisEngine(BaseEngine):
         from analytics.pipeline import analytics_pipeline
         narratives = [analytics_pipeline.build_narrative(r, dataset_name) for r in results]
         
-        total_missing = int(df.isna().sum().sum())
-        total_cells = len(df) * len(df.columns)
-        rows_with_missing = int(df.isna().any(axis=1).sum())
-        complete_rows = len(df) - rows_with_missing
+        # Memoized dataset dimensions to avoid recomputing 600ms full-table scans on every request
+        df_cache = getattr(df, "_plexis_dim_cache", None)
+        if df_cache is None or df_cache.get("shape") != df.shape:
+            total_missing = int(df.isna().sum().sum())
+            total_cells = len(df) * len(df.columns)
+            rows_with_missing = int(df.isna().any(axis=1).sum())
+            complete_rows = len(df) - rows_with_missing
+            dup_rows = int(df.duplicated().sum())
+            df_cache = {
+                "shape": df.shape,
+                "total_missing": total_missing,
+                "total_cells": total_cells,
+                "rows_with_missing": rows_with_missing,
+                "complete_rows": complete_rows,
+                "duplicate_rows": dup_rows,
+            }
+            try:
+                df._plexis_dim_cache = df_cache
+            except Exception:
+                pass
+        else:
+            total_missing = df_cache["total_missing"]
+            total_cells = df_cache["total_cells"]
+            rows_with_missing = df_cache["rows_with_missing"]
+            complete_rows = df_cache["complete_rows"]
+            dup_rows = df_cache["duplicate_rows"]
 
         facts = {
             "computed_answer": "\n\n".join(narratives),
@@ -160,7 +182,7 @@ class AnalysisEngine(BaseEngine):
                 "complete_cells": total_cells - total_missing,
                 "rows_with_missing": rows_with_missing,
                 "complete_rows": complete_rows,
-                "duplicate_rows": int(df.duplicated().sum()),
+                "duplicate_rows": dup_rows,
             },
             "operations": [
                 {
@@ -169,20 +191,28 @@ class AnalysisEngine(BaseEngine):
                     "column": r.column,
                     "details": getattr(r, "details", {}),
                     "summary": narratives[i] if i < len(narratives) else "",
-                    "matching_rows": r.matching_rows[:3],
-                    "row_indices": r.row_indices[:5]
+                    "matching_rows": r.matching_rows[:50],
+                    "row_indices": r.row_indices[:50]
                 }
                 for i, r in enumerate(results)
             ]
         }
+        if results:
+            context.analytical_result = results[0]
+            context.analysis_id = str(results[0].analysis_id)
         evidence = [r.to_response_dict() for r in results]
+
+        # Execution architecture: Class A vs. Hybrid vs. Unverified fallback
+        is_hybrid = getattr(context, "execution_class", "") == "Hybrid"
+        has_content = bool(narratives and all(n and n.strip() for n in narratives))
+        can_bypass_llm = all_verified and has_content and not is_hybrid
 
         engine_result = EngineResult(
             answer="\n\n".join(narratives),
             source="analysis",
             provider="system",
             success=True,
-            should_compose=True,
+            should_compose=not can_bypass_llm,
             facts=facts,
             evidence=evidence,
         )

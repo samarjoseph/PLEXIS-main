@@ -110,7 +110,7 @@ class TransformEngine(BaseEngine):
                 # Parsing failure must not block otherwise supported plans.
                 logger.debug('[TransformEngine] Literal boundary canonicalization skipped: %s', exc)
 
-        if operation.get('_missing_slots'):
+        if operation.get('_missing_slots') and operation.get('type') != 'EXTREME_VALUE_AMBIGUITY':
             slots = list(operation['_missing_slots'])
             question = self._question_for_slots(operation.get('type'), slots, operation)
             return self._create_pending_clarification(
@@ -169,10 +169,14 @@ class TransformEngine(BaseEngine):
                 plan = transformation_planner.plan(df, operation, dataset_id)
                 
         except TransformationClarificationRequired as e:
+            extra_meta = {}
+            if getattr(e, 'ambiguous_options', None):
+                extra_meta['ambiguous_options'] = e.ambiguous_options
             return self._create_pending_clarification(
                 context, e.operation_payload or operation, df, candidates=e.candidate_columns,
                 missing_slots=e.missing_slots, question=str(e),
                 clarification_type=e.clarification_type,
+                extra_metadata=extra_meta if extra_meta else None,
             )
         except ValueTypeMismatchConfirmationRequired as e:
             return self._create_pending_clarification(
@@ -188,22 +192,19 @@ class TransformEngine(BaseEngine):
         except Exception as e:
             if type(e).__name__ == 'ValueAmbiguityClarificationRequired':
                 return self._create_pending_clarification(
-                    context, e.operation_payload or operation, df, candidates=[],
+                    context, getattr(e, 'operation_payload', None) or operation, df, candidates=[],
                     missing_slots=['value_ambiguity_confirmation'], question=str(e),
                     clarification_type='VALUE_AMBIGUITY',
                     extra_metadata={
                         'ambiguous_options': getattr(e, 'ambiguous_options', []),
                     }
                 )
-            if not isinstance(e, ValueError):
-                raise
-        except ValueError as e:
-            return EngineResult(
-                answer=f"Cannot create transformation plan: {e}",
-                source='transform', provider='system', success=False, error=str(e),
-                should_compose=False,
-            )
-        except Exception as e:
+            if isinstance(e, ValueError):
+                return EngineResult(
+                    answer=f"Cannot create transformation plan: {e}",
+                    source='transform', provider='system', success=False, error=str(e),
+                    should_compose=False,
+                )
             logger.error('[TransformEngine] Planner error: %s', e, exc_info=True)
             return EngineResult(
                 answer='Failed to plan transformation.',
@@ -456,11 +457,36 @@ class TransformEngine(BaseEngine):
         def _is_nan(v):
             try:
                 if v is None: return False
-                if isinstance(v, float) and math.isnan(v): return True
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)): return True
                 if pd.isna(v): return True
                 return False
             except:
                 return False
+
+        def _clean_val(v):
+            if v is None:
+                return None
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                if _is_nan(v):
+                    return None
+                return v
+            try:
+                import numpy as np
+                if isinstance(v, np.integer):
+                    return int(v)
+                if isinstance(v, np.floating):
+                    return float(v) if not np.isnan(v) and not np.isinf(v) else None
+                if isinstance(v, np.bool_):
+                    return bool(v)
+            except ImportError:
+                pass
+            if isinstance(v, dict):
+                return {str(k): _clean_val(val) for k, val in v.items()}
+            if isinstance(v, (list, tuple, set)):
+                return [_clean_val(item) for item in v]
+            return str(v)
 
         return {
             'plan_id': plan.plan_id,
@@ -468,21 +494,20 @@ class TransformEngine(BaseEngine):
             'operation_type': plan.operation_type,
             'operation_label': plan.operation_label,
             'operation_code': plan.operation_code,
-            'affected_rows_count': plan.affected_rows_count,
-            'affected_cells_count': plan.affected_cells_count,
+            'affected_rows_count': _clean_val(plan.affected_rows_count),
+            'affected_cells_count': _clean_val(plan.affected_cells_count),
             'affected_columns': plan.affected_columns,
-            'operation_payload': getattr(plan, 'operation_payload', {}),
+            'operation_payload': _clean_val(getattr(plan, 'operation_payload', {})),
             'intelligence_provenance': getattr(plan, 'intelligence_provenance', None),
             'before_sample': [{
-                'row_index': c.row_index,
-                'source_row_number': c.source_row_number,
+                'row_index': _clean_val(c.row_index),
+                'source_row_number': _clean_val(c.source_row_number),
                 'column': c.column,
-                'before': None if _is_nan(c.before) else (c.before if c.before is None or isinstance(c.before, (int, float, bool, str)) else str(c.before)),
-                'after': None if _is_nan(c.after) else (c.after if c.after is None or isinstance(c.after, (int, float, bool, str)) else str(c.after)),
+                'before': None if _is_nan(c.before) else _clean_val(c.before),
+                'after': None if _is_nan(c.after) else _clean_val(c.after),
             } for c in plan.before_sample],
             'warnings': plan.warnings,
             'created_at': plan.created_at,
-            'intelligence_provenance': getattr(plan, 'intelligence_provenance', None),
         }
 
 

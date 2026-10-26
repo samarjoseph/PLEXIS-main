@@ -1,16 +1,18 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus, ArrowUp, X, FileSpreadsheet,
-  Search, LineChart, MessageSquare, Menu, BarChart3,
+  FileSpreadsheet, Search, LineChart, MessageSquare, Menu, BarChart3,
 } from 'lucide-react';
 import PlexisLogo from '../brand/PlexisLogo';
 import MessageBubbleV2 from './MessageBubbleV2';
 import AIThinkingIndicator from './AIThinkingIndicator';
+import ChatInputBar from './ChatInputBar';
 import { useAuth } from '../../context/AuthContext';
 import { LogoToggle } from './SidebarV2';
 import Tooltip from '../ui/Tooltip';
 import WorkspaceToggleButton from '../workspace/WorkspaceToggleButton.jsx';
+import { EventBus } from '../../events/EventBus';
+import { Events } from '../../events/Events';
 
 /* ─────────────────────────────────────────────────────────────────
    useIsDesktop: true when viewport >= 1024px
@@ -27,6 +29,133 @@ function useIsDesktop() {
 
   return isDesktop;
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   ChatMessageList: Memoized message feed to prevent re-rendering
+   entire conversation history when input changes or typing occurs.
+   ───────────────────────────────────────────────────────────────── */
+const ChatMessageList = memo(function ChatMessageList({
+  messages,
+  isLoading,
+  showWelcome,
+  greeting,
+  firstName,
+  onUploadClick,
+  onPrefill,
+  onRetry,
+  onApplyTransform,
+  onCancelTransform,
+  onClarificationAction,
+  onUndoTransform,
+  onExportDataset,
+  isApplyingTransform,
+  chatBodyRef,
+  scrollRef,
+}) {
+  return (
+    <div className="v2-chat-messages" ref={chatBodyRef}>
+      {showWelcome && (
+        <motion.div
+          className="v2-welcome"
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <div className="v2-welcome-icon">
+            <PlexisLogo width={26} height={26} />
+          </div>
+          <h2>
+            {greeting}{firstName ? `, ${firstName}` : ''}
+          </h2>
+          <p>What would you like to explore today?</p>
+
+          <div className="v2-welcome-cards">
+            <button
+              type="button"
+              className="v2-welcome-card"
+              onClick={onUploadClick}
+            >
+              <div className="v2-welcome-card-icon">
+                <FileSpreadsheet size={18} />
+              </div>
+              <span className="v2-welcome-card-title">Upload Dataset</span>
+              <span className="v2-welcome-card-desc">Analyze CSV files with AI</span>
+            </button>
+
+            <button
+              type="button"
+              className="v2-welcome-card"
+              onClick={() => onPrefill('Research the latest trends in AI data analytics.')}
+            >
+              <div className="v2-welcome-card-icon">
+                <Search size={18} />
+              </div>
+              <span className="v2-welcome-card-title">Research the Web</span>
+              <span className="v2-welcome-card-desc">Get live web insights</span>
+            </button>
+
+            <button
+              type="button"
+              className="v2-welcome-card"
+              onClick={() => onPrefill('Generate insights from the current dataset.')}
+            >
+              <div className="v2-welcome-card-icon">
+                <LineChart size={18} />
+              </div>
+              <span className="v2-welcome-card-title">Generate Insights</span>
+              <span className="v2-welcome-card-desc">Extract patterns & trends</span>
+            </button>
+
+            <button
+              type="button"
+              className="v2-welcome-card"
+              onClick={() => onPrefill('Ask Plexis anything.')}
+            >
+              <div className="v2-welcome-card-icon">
+                <MessageSquare size={18} />
+              </div>
+              <span className="v2-welcome-card-title">Ask Anything</span>
+              <span className="v2-welcome-card-desc">Chat with Plexis AI</span>
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {messages.map((msg) => (
+        <div
+          key={msg.id}
+          className={`v2-msg-row v2-msg-row--${msg.sender}`}
+        >
+          <MessageBubbleV2
+            message={msg}
+            onRetry={onRetry}
+            onApplyTransform={onApplyTransform}
+            onCancelTransform={onCancelTransform}
+            onClarificationAction={onClarificationAction}
+            onUndoTransform={onUndoTransform}
+            onExportDataset={onExportDataset}
+            isApplyingTransform={isApplyingTransform}
+          />
+        </div>
+      ))}
+
+      <AnimatePresence>
+        {isLoading && (
+          <motion.div
+            className="v2-msg-row v2-msg-row--ai"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+          >
+            <AIThinkingIndicator />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div ref={scrollRef} />
+    </div>
+  );
+});
 
 export default function ChatAreaV2({
   messages,
@@ -58,8 +187,6 @@ export default function ChatAreaV2({
   const isDesktop = useIsDesktop();
   const scrollRef = useRef(null);
   const chatBodyRef = useRef(null);
-  const textareaRef = useRef(null);
-  const fileRef = useRef(null);
   const [greeting, setGreeting] = useState('');
   // True when the user has scrolled up manually — halts auto-scroll until they return to bottom
   const [userScrolledUp, setUserScrolledUp] = useState(false);
@@ -90,21 +217,16 @@ export default function ChatAreaV2({
     }
   }, [messages, isLoading, userScrolledUp]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = '24px';
-      const scrollH = textareaRef.current.scrollHeight;
-      textareaRef.current.style.height = `${Math.min(scrollH, 160)}px`;
-    }
-  }, [inputText]);
+  const handleUploadClick = useCallback(() => {
+    document.getElementById('dataset-upload-input')?.click();
+  }, []);
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
+  const handlePrefill = useCallback((text) => {
+    EventBus.emit(Events.PREFILL_CHAT_INPUT, text);
+    if (onInputChange) {
+      onInputChange(text);
     }
-  };
+  }, [onInputChange]);
 
   const firstName = user?.name?.split(' ')[0] || '';
   const showWelcome = messages.length === 0 && !isLoading;
@@ -113,10 +235,6 @@ export default function ChatAreaV2({
     <main className="v2-chat">
       {/* ── Header ── */}
       <header className="v2-chat-header">
-        {/*
-          Mobile only: hamburger button opens sidebar.
-          Desktop: hidden — the Plexis logo in sidebar handles toggle.
-        */}
         {!isDesktop && (
           <button
             type="button"
@@ -137,7 +255,6 @@ export default function ChatAreaV2({
         </div>
 
         <div className="v2-chat-header-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {/* Workspace toggle — only shown when a dataset is loaded */}
           {activeDatasetId && (
             <Tooltip label="Open data table" side="left">
               <WorkspaceToggleButton
@@ -170,174 +287,35 @@ export default function ChatAreaV2({
         </div>
       </header>
 
-      {/* ── Messages ── */}
-      <div className="v2-chat-messages" ref={chatBodyRef}>
-        {showWelcome && (
-          <motion.div
-            className="v2-welcome"
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <div className="v2-welcome-icon">
-              <PlexisLogo width={26} height={26} />
-            </div>
-            <h2>
-              {greeting}{firstName ? `, ${firstName}` : ''}
-            </h2>
-            <p>What would you like to explore today?</p>
+      {/* ── Messages feed (memoized) ── */}
+      <ChatMessageList
+        messages={messages}
+        isLoading={isLoading}
+        showWelcome={showWelcome}
+        greeting={greeting}
+        firstName={firstName}
+        onUploadClick={handleUploadClick}
+        onPrefill={handlePrefill}
+        onRetry={onRetry}
+        onApplyTransform={onApplyTransform}
+        onCancelTransform={onCancelTransform}
+        onClarificationAction={onClarificationAction}
+        onUndoTransform={onUndoTransform}
+        onExportDataset={onExportDataset}
+        isApplyingTransform={isApplyingTransform}
+        chatBodyRef={chatBodyRef}
+        scrollRef={scrollRef}
+      />
 
-            <div className="v2-welcome-cards">
-              <button
-                type="button"
-                className="v2-welcome-card"
-                onClick={() => fileRef.current?.click()}
-              >
-                <div className="v2-welcome-card-icon">
-                  <FileSpreadsheet size={18} />
-                </div>
-                <span className="v2-welcome-card-title">Upload Dataset</span>
-                <span className="v2-welcome-card-desc">Analyze CSV files with AI</span>
-              </button>
-
-              <button
-                type="button"
-                className="v2-welcome-card"
-                onClick={() => onInputChange('Research the latest trends in AI data analytics.')}
-              >
-                <div className="v2-welcome-card-icon">
-                  <Search size={18} />
-                </div>
-                <span className="v2-welcome-card-title">Research the Web</span>
-                <span className="v2-welcome-card-desc">Get live web insights</span>
-              </button>
-
-              <button
-                type="button"
-                className="v2-welcome-card"
-                onClick={() => onInputChange('Generate insights from the current dataset.')}
-              >
-                <div className="v2-welcome-card-icon">
-                  <LineChart size={18} />
-                </div>
-                <span className="v2-welcome-card-title">Generate Insights</span>
-                <span className="v2-welcome-card-desc">Extract patterns & trends</span>
-              </button>
-
-              <button
-                type="button"
-                className="v2-welcome-card"
-                onClick={() => onInputChange('Ask Plexis anything.')}
-              >
-                <div className="v2-welcome-card-icon">
-                  <MessageSquare size={18} />
-                </div>
-                <span className="v2-welcome-card-title">Ask Anything</span>
-                <span className="v2-welcome-card-desc">Chat with Plexis AI</span>
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`v2-msg-row v2-msg-row--${msg.sender}`}
-          >
-            <MessageBubbleV2
-              message={msg}
-              onRetry={onRetry}
-              onApplyTransform={onApplyTransform}
-              onCancelTransform={onCancelTransform}
-              onClarificationAction={onClarificationAction}
-              onUndoTransform={onUndoTransform}
-              onExportDataset={onExportDataset}
-              isApplyingTransform={isApplyingTransform}
-            />
-          </div>
-        ))}
-
-        <AnimatePresence>
-          {isLoading && (
-            <motion.div
-              className="v2-msg-row v2-msg-row--ai"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              <AIThinkingIndicator />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div ref={scrollRef} />
-      </div>
-
-      {/* ── Input ── */}
-      <div className="v2-chat-input-area">
-        <div className="v2-input-container">
-          {stagedFile && (
-            <div className="v2-staged-file">
-              <FileSpreadsheet size={14} />
-              <span>{stagedFile.name}</span>
-              <button type="button" onClick={onCancelFile} aria-label="Remove file">
-                <X size={14} />
-              </button>
-            </div>
-          )}
-
-          <div className="v2-input-row">
-            <Tooltip label="Upload Dataset" shortcut="Ctrl+U" side="top">
-              <button
-                type="button"
-                className="v2-attach-btn"
-                onClick={() => fileRef.current?.click()}
-                disabled={isLoading}
-              >
-                <Plus size={18} />
-              </button>
-            </Tooltip>
-
-            <input
-              id="dataset-upload-input"
-              ref={fileRef}
-              type="file"
-              accept=".csv"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file?.name.endsWith('.csv')) onStageFile(file);
-                e.target.value = '';
-              }}
-            />
-
-              <textarea
-                ref={textareaRef}
-                className="v2-input-field"
-                placeholder={isLoading ? 'Plexis is analyzing…' : 'Message Plexis...'}
-                disabled={isLoading}
-                rows={1}
-                value={inputText}
-                onChange={(e) => onInputChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                style={{ height: '24px' }}
-              />
-
-            <Tooltip label="Send Message" shortcut="⏎ Enter" side="top">
-              <motion.button
-                type="button"
-                className="v2-send-btn"
-                disabled={(!inputText.trim() && !stagedFile) || isLoading}
-                onClick={onSend}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <ArrowUp size={16} />
-              </motion.button>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
+      {/* ── Isolated Chat Input Bar ── */}
+      <ChatInputBar
+        onSend={onSend}
+        stagedFile={stagedFile}
+        onStageFile={onStageFile}
+        onCancelFile={onCancelFile}
+        isLoading={isLoading}
+        initialText={inputText || ''}
+      />
     </main>
   );
 }

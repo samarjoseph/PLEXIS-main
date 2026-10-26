@@ -85,6 +85,9 @@ class TransformationExecutor:
             # ── Execute the transformation ──
             new_df = self._execute(df.copy(), plan)
 
+            # ── Deterministic Postcondition Verification ──
+            self._verify_postconditions(df, new_df, plan)
+
             # ── No-op detection ──
             changed_cells = plan.affected_cells_count
             is_noop = (
@@ -303,7 +306,107 @@ class TransformationExecutor:
                 return df.sort_values(column, ascending=ascending).reset_index(drop=True)
             return df
 
+        elif op == 'CLIP':
+            col = payload.get('column')
+            min_val = payload.get('min')
+            max_val = payload.get('max')
+            if col in df.columns:
+                try:
+                    import duckdb
+                    con = duckdb.connect(':memory:')
+                    con.register('df_view', df)
+                    select_exprs = []
+                    params = []
+                    for c in df.columns:
+                        if c == col:
+                            if min_val is not None and max_val is not None:
+                                select_exprs.append(f'CASE WHEN "{col}" > ? THEN ? WHEN "{col}" < ? THEN ? ELSE "{col}" END AS "{col}"')
+                                params.extend([max_val, max_val, min_val, min_val])
+                            elif max_val is not None:
+                                select_exprs.append(f'CASE WHEN "{col}" > ? THEN ? ELSE "{col}" END AS "{col}"')
+                                params.extend([max_val, max_val])
+                            elif min_val is not None:
+                                select_exprs.append(f'CASE WHEN "{col}" < ? THEN ? ELSE "{col}" END AS "{col}"')
+                                params.extend([min_val, min_val])
+                            else:
+                                select_exprs.append(f'"{col}"')
+                        else:
+                            select_exprs.append(f'"{c}"')
+                    query = f'SELECT {", ".join(select_exprs)} FROM df_view'
+                    new_df = con.execute(query, params).df()
+                    con.close()
+                    return new_df
+                except Exception as duck_err:
+                    logger.warning("[TransformationExecutor] DuckDB CLIP fallback to pandas: %s", duck_err)
+                    df[col] = df[col].clip(lower=min_val, upper=max_val)
+                    return df
+            return df
+
+        elif op == 'UPDATE_EXTREMUM':
+            col = payload.get('column')
+            extremum = str(payload.get('extremum', 'max')).lower()
+            new_val = payload.get('new_value')
+            curr_ext = payload.get('current_extremum')
+            if col in df.columns:
+                try:
+                    import duckdb
+                    con = duckdb.connect(':memory:')
+                    con.register('df_view', df)
+                    if curr_ext is None:
+                        agg_fn = 'MAX' if extremum == 'max' else 'MIN'
+                        curr_ext = con.execute(f'SELECT {agg_fn}("{col}") FROM df_view').fetchone()[0]
+                    select_exprs = []
+                    for c in df.columns:
+                        if c == col:
+                            select_exprs.append(f'CASE WHEN "{col}" = ? THEN ? ELSE "{col}" END AS "{col}"')
+                        else:
+                            select_exprs.append(f'"{c}"')
+                    query = f'SELECT {", ".join(select_exprs)} FROM df_view'
+                    new_df = con.execute(query, [curr_ext, new_val]).df()
+                    con.close()
+                    return new_df
+                except Exception as duck_err:
+                    logger.warning("[TransformationExecutor] DuckDB UPDATE_EXTREMUM fallback to pandas: %s", duck_err)
+                    s = pd.to_numeric(df[col], errors='coerce')
+                    if curr_ext is None:
+                        curr_ext = s.max() if extremum == 'max' else s.min()
+                    mask = (s == curr_ext)
+                    df.loc[mask, col] = new_val
+                    return df
+            return df
+
         raise ValueError(f"Unknown operation type: {op}")
+
+    def _verify_postconditions(self, old_df: pd.DataFrame, new_df: pd.DataFrame, plan: TransformationPlan) -> None:
+        """Verify that the execution produced the expected postconditions."""
+        op_type = (plan.operation_type or '').upper()
+        payload = plan.operation_payload or {}
+        
+        if op_type == 'CLIP':
+            col = payload.get('column') or (plan.affected_columns[0] if plan.affected_columns else None)
+            if col and col in new_df.columns:
+                num_s = pd.to_numeric(new_df[col], errors='coerce').dropna()
+                max_v = payload.get('max')
+                if max_v is not None and not num_s.empty:
+                    actual_max = num_s.max()
+                    if actual_max > max_v:
+                        raise RuntimeError(f"Postcondition failed: Column '{col}' max is {actual_max}, expected <= {max_v}")
+                min_v = payload.get('min')
+                if min_v is not None and not num_s.empty:
+                    actual_min = num_s.min()
+                    if actual_min < min_v:
+                        raise RuntimeError(f"Postcondition failed: Column '{col}' min is {actual_min}, expected >= {min_v}")
+
+        elif op_type == 'UPDATE_EXTREMUM':
+            col = payload.get('column') or (plan.affected_columns[0] if plan.affected_columns else None)
+            new_val = payload.get('new_value')
+            if col and col in new_df.columns and plan.before_sample:
+                for cell in plan.before_sample:
+                    actual_val = new_df.loc[cell.row_index, col]
+                    if actual_val != cell.after:
+                        raise RuntimeError(
+                            f"Postcondition failed: Row {cell.row_index} in '{col}' has value {actual_val}, expected {cell.after}"
+                        )
 
     def _persist_version(
         self, db, new_df, plan, original_db_dataset_id, user_id, base_filename

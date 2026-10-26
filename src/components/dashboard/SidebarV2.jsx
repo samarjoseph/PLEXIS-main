@@ -14,6 +14,7 @@ import {
   Sparkles,
   Settings,
   PanelLeft,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { sortConversations } from '../../utils/conversationStorage';
@@ -370,6 +371,7 @@ export default function SidebarV2({
   collapsed,
   mobileOpen,
   onToggleCollapse,
+  onCloseMobile,
   conversations,
   activeId,
   searchQuery,
@@ -476,7 +478,7 @@ export default function SidebarV2({
                     <LogoToggle collapsed={collapsed} onToggle={onToggleCollapse} />
                 </Tooltip>
               ) : (
-                <div className="v2-sidebar-logo-mobile" style={{ display: 'flex' }}>
+                <div className="v2-sidebar-logo-mobile" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <PlexisLogo width={18} height={18} />
                 </div>
               )}
@@ -489,6 +491,16 @@ export default function SidebarV2({
                 Plexis
               </motion.span>
             </div>
+            {!isDesktop && (
+              <button
+                type="button"
+                className="v2-sidebar-mobile-close"
+                onClick={onCloseMobile}
+                aria-label="Close sidebar"
+              >
+                <X size={18} />
+              </button>
+            )}
           </div>
 
           <Tooltip label="New Chat" shortcut="Ctrl+N" side="right" fullWidth={true}>

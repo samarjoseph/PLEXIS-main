@@ -156,18 +156,36 @@ class ProviderEngine:
         slot = credential_scheduler.select_and_reserve(model_meta.provider, model_id=model_meta.model_id)
         api_key = slot.api_key if slot else provider_registry.get_api_key(model_meta.provider)
 
+        active_request = request
+        if getattr(request, 'system_prompt', None):
+            runtime_note = (
+                f"\n\n[Active Runtime Model Context: This response is powered by model '{model_meta.model_id}' "
+                f"via provider '{model_meta.provider}'. If the user asks which underlying model or provider powers this response, "
+                f"disclose this information accurately while maintaining your identity as Plexis.]"
+            )
+            if hasattr(request, 'model_copy'):
+                active_request = request.model_copy(update={
+                    "model_id": model_meta.model_id,
+                    "system_prompt": request.system_prompt + runtime_note
+                })
+            else:
+                request.model_id = model_meta.model_id
+                request.system_prompt += runtime_note
+        elif hasattr(request, 'model_copy'):
+            active_request = request.model_copy(update={"model_id": model_meta.model_id})
+
         try:
             try:
-                yield from provider_instance.generate_stream(request, api_key=api_key)
+                yield from provider_instance.generate_stream(active_request, api_key=api_key)
             except TypeError:
-                yield from provider_instance.generate_stream(request)
+                yield from provider_instance.generate_stream(active_request)
         except Exception as e:
             logger.error(f"generate_stream: provider '{model_meta.provider}' raised {e}")
             # Final fallback — non-streaming generate
             try:
-                response = provider_instance.generate(request, api_key=api_key)
+                response = provider_instance.generate(active_request, api_key=api_key)
             except TypeError:
-                response = provider_instance.generate(request)
+                response = provider_instance.generate(active_request)
             if response.success and response.text:
                 yield response.text
         finally:

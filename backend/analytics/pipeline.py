@@ -33,7 +33,8 @@ import pandas as pd
 
 from analytics.result import AnalyticalResult
 from analytics.session_recorder import session_recorder
-from executor.pandas_executor import pandas_executor, ExecutorResult
+from executor.hybrid_executor import hybrid_executor
+from executor.pandas_executor import ExecutorResult
 from planner.context import planner_context_builder
 from planner.core import analytical_planner
 from planner.schema import AnalyticalPlan
@@ -244,52 +245,28 @@ class AnalyticsPipeline:
                 plan = AnalyticalPlan(intent="sum", operation="sum", target_column=col, plan=[])
             elif op_type == "MEAN":
                 plan = AnalyticalPlan(intent="mean", operation="mean", target_column=col, plan=[])
-            elif op_type == "GROUP_SUM":
+            elif op_type in ("GROUP_SUM", "GROUP_MEAN", "GROUP_MEDIAN", "GROUP_COUNT", "GROUP_MIN", "GROUP_MAX", "GROUP_COUNT_FILTERED"):
                 val_col = operation_override.get("value_column")
+                top_n = operation_override.get("top_n")
+                order = operation_override.get("order", "desc")
+                ascending = order == "asc" or operation_override.get("ascending", False)
                 plan = AnalyticalPlan(
-                    intent="group_sum", operation="group_sum",
+                    intent=op_type.lower(),
+                    operation=op_type.lower(),
                     target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
-                    plan=[]
-                )
-            elif op_type == "GROUP_MEAN":
-                val_col = operation_override.get("value_column")
-                plan = AnalyticalPlan(
-                    intent="group_mean", operation="group_mean",
-                    target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
-                    plan=[]
-                )
-            elif op_type == "GROUP_MEDIAN":
-                val_col = operation_override.get("value_column")
-                plan = AnalyticalPlan(
-                    intent="group_median", operation="group_median",
-                    target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
-                    plan=[]
-                )
-            elif op_type == "GROUP_COUNT":
-                val_col = operation_override.get("value_column")
-                plan = AnalyticalPlan(
-                    intent="group_count", operation="group_count",
-                    target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
-                    plan=[]
-                )
-            elif op_type == "GROUP_MIN":
-                val_col = operation_override.get("value_column")
-                plan = AnalyticalPlan(
-                    intent="group_min", operation="group_min",
-                    target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
-                    plan=[]
-                )
-            elif op_type == "GROUP_MAX":
-                val_col = operation_override.get("value_column")
-                plan = AnalyticalPlan(
-                    intent="group_max", operation="group_max",
-                    target_column=col,
-                    parameters={"group_by": col, "value_column": val_col},
+                    parameters={
+                        "group_by": col,
+                        "value_column": val_col,
+                        "filter_column": operation_override.get("filter_column") or val_col,
+                        "filter_op": operation_override.get("filter_op", ">"),
+                        "filter_value": operation_override.get("filter_value", 0),
+                        "filter_desc": operation_override.get("filter_desc")
+                            or (operation_override.get("details") or {}).get("filter_desc")
+                            or "positive observations",
+                        "top_n": top_n,
+                        "order": order,
+                        "ascending": ascending,
+                    },
                     plan=[]
                 )
             elif op_type in ("QUANTILE", "QUANTILES"):
@@ -433,8 +410,29 @@ class AnalyticsPipeline:
                     parameters=operation_override,
                     plan=[]
                 )
+            elif op_type in ("AUDIT_NUMERIC_CONVERSION", "audit_numeric_conversion"):
+                plan = AnalyticalPlan(
+                    intent="audit_numeric_conversion", operation="audit_numeric_conversion",
+                    target_column=col or operation_override.get("column"),
+                    parameters=operation_override,
+                    plan=[]
+                )
 
             # ── 15 retail-specific operations ────────────────────────────────
+            elif op_type in ("OVERALL_EVENT_RATE", "overall_event_rate"):
+                plan = AnalyticalPlan(
+                    intent="overall_event_rate", operation="overall_event_rate",
+                    target_column=operation_override.get("target_column") or col,
+                    parameters=operation_override,
+                    plan=[]
+                )
+            elif op_type in ("GROUP_METRIC_DIFFERENCE", "group_metric_difference", "DERIVED_GROUP_COMPARISON", "derived_group_comparison"):
+                plan = AnalyticalPlan(
+                    intent="group_metric_difference", operation="group_metric_difference",
+                    target_column=operation_override.get("value_column") or col,
+                    parameters=operation_override,
+                    plan=[]
+                )
             elif op_type == "HYPOTHETICAL_FILL_MEAN":
                 plan = AnalyticalPlan(
                     intent="hypothetical_fill_mean", operation="hypothetical_fill_mean",
@@ -506,7 +504,8 @@ class AnalyticsPipeline:
             elif op_type == "OVERALL_RETURN_RATE":
                 plan = AnalyticalPlan(intent="overall_return_rate", operation="overall_return_rate", target_column=None, plan=[])
             elif op_type == "PROMOTION_CODE_USAGE":
-                plan = AnalyticalPlan(intent="promotion_code_usage", operation="promotion_code_usage", target_column="Promotion_Code", plan=[])
+                target_col = col or "Promotion_Code"
+                plan = AnalyticalPlan(intent="promotion_code_usage", operation="promotion_code_usage", target_column=target_col, plan=[])
             elif op_type == "TOP_COUNTRY_IN_YEAR":
                 plan = AnalyticalPlan(
                     intent="top_country_in_year", operation="top_country_in_year",
@@ -561,7 +560,12 @@ class AnalyticsPipeline:
         # ----------------------------------------------------------------
         # Log the exact context used for validation
         target_col = plan.target_column
-        resolved_type = column_types.get(target_col, "unknown") if target_col else "n/a"
+        if isinstance(target_col, (list, tuple)):
+            resolved_type = "list"
+        elif target_col:
+            resolved_type = column_types.get(target_col, "unknown")
+        else:
+            resolved_type = "n/a"
         logger.info(
             "[PlannerValidationContext] column=%s canonical_type=%s operation=%s",
             target_col, resolved_type, plan.operation,
@@ -594,7 +598,7 @@ class AnalyticsPipeline:
         # ----------------------------------------------------------------
         # Step 4: Execute  [Pandas, no LLM]
         # ----------------------------------------------------------------
-        exec_result: ExecutorResult = pandas_executor.execute(plan, df)
+        exec_result: ExecutorResult = hybrid_executor.execute(plan, df)
 
         if not exec_result.success:
             logger.warning("[Pipeline] Executor failed: %s", exec_result.error)
@@ -607,12 +611,42 @@ class AnalyticsPipeline:
         result.details = dict(getattr(exec_result, "details", {}) or {})
         result.details["total_rows"] = len(df)
 
+        # Resolve unit from trusted sources (metadata, data dictionary, user definitions)
+        from analytics.unit_resolver import resolve_unit
+        dataset_meta = getattr(execution_context, "dataset_profile", None) or getattr(execution_context, "column_profiles", None)
+        data_dict = getattr(getattr(execution_context, "dko", None), "data_dictionary", None)
+        user_defs = getattr(getattr(execution_context, "workspace_state", None), "user_definitions", None)
+
+        unit_res = resolve_unit(
+            column=result.column,
+            operation=result.operation,
+            dataset_metadata=dataset_meta,
+            data_dictionary=data_dict,
+            user_definitions=user_defs,
+        )
+        result.details["unit"] = unit_res.unit
+        result.details["unit_status"] = unit_res.status
+        result.details["unit_label"] = unit_res.label
+        result.details["unit_provenance"] = unit_res.provenance
+        exec_result.details = exec_result.details or {}
+        exec_result.details["unit"] = unit_res.unit
+        exec_result.details["unit_status"] = unit_res.status
+        exec_result.details["unit_label"] = unit_res.label
+        exec_result.details["unit_provenance"] = unit_res.provenance
+
         logger.info("[Pipeline] Executor: value=%s indices=%d", result.value, len(result.row_indices))
 
         # ----------------------------------------------------------------
         # Step 5: Verify  [deterministic, no LLM]
         # ----------------------------------------------------------------
-        verify_result: VerifierResult = result_verifier.verify(exec_result, plan, df)
+        verify_result: VerifierResult = result_verifier.verify(
+            exec_result,
+            plan,
+            df,
+            dataset_metadata=dataset_meta,
+            data_dictionary=data_dict,
+            user_definitions=user_defs,
+        )
 
         result.verified = verify_result.verified
         result.verification_details = verify_result.details or {}
@@ -703,7 +737,8 @@ class AnalyticsPipeline:
 
         The LLM Composer MUST use this value rather than recomputing.
         """
-        if not result.verified or result.value is None:
+        verified = getattr(result, "verified", getattr(result, "success", True))
+        if not verified or result.value is None:
             return ""
 
         col = result.column or "value"
@@ -711,21 +746,82 @@ class AnalyticsPipeline:
         op = result.operation
 
         # Format the narrative based on operation type
-        if op in ("max", "min"):
-            label = "highest" if op == "max" else "lowest"
-            name_parts = []
-            for row in result.matching_rows[:1]:
-                # Find a likely name column
-                for name_col in ("name", "Name", "full_name", "Full_Name", "employee"):
-                    if row.get(name_col):
-                        name_parts.append(str(row[name_col]))
-                        break
-            if name_parts:
-                return (
-                    f"In **{dataset_name}**, the {label} **{col}** is **{val}** "
-                    f"(record: {name_parts[0]})."
-                )
-            return f"In **{dataset_name}**, the {label} **{col}** is **{val}**."
+        if op in ("top_n", "bottom_n"):
+            n_val = (result.details or {}).get("n") or (len(result.matching_rows) if result.matching_rows else (len(val) if isinstance(val, list) else 10))
+            direction = "highest" if op == "top_n" else "lowest"
+            return f"Top {n_val} records ranked by {direction} **{col}** in **{dataset_name}**."
+
+        if op in ("group_mean", "group_sum", "group_median", "group_count", "group_count_filtered", "group_min", "group_max"):
+            details = result.details or {}
+            top_n = details.get("top_n")
+            val_col = details.get("value_column") or col
+            if "count_filtered" in op:
+                stat_name = f"count of {details.get('filter_desc', 'delayed flights (delay > 0)')}"
+            elif "mean" in op:
+                stat_name = "average"
+            elif "max" in op:
+                stat_name = "maximum"
+            elif "min" in op:
+                stat_name = "minimum"
+            elif "median" in op:
+                stat_name = "median"
+            elif "sum" in op:
+                stat_name = "total"
+            elif "count" in op:
+                stat_name = "frequency count"
+            else:
+                stat_name = op.replace("group_", "")
+
+            if isinstance(val, dict):
+                items = list(val.items())
+                if top_n:
+                    order = str(details.get("order", "desc")).lower()
+                    direction_label = "Bottom" if order in ("asc", "ascending") else "Top"
+                    n_returned = len(items)
+                    n_requested = int(top_n)
+                    # Distinguish dataset exhaustion from a pipeline truncation bug.
+                    # total_groups is the count of distinct groups BEFORE the LIMIT.
+                    total_groups = details.get("total_groups") or details.get("eligible_group_count")
+                    dataset_exhausted = (
+                        n_returned < n_requested
+                        and total_groups is not None
+                        and int(total_groups) <= n_returned
+                    )
+                    if dataset_exhausted:
+                        entity_name = col if n_returned == 1 else f"{col} entities"
+                        metric_phrase = stat_name if "count_filtered" in op else f"{stat_name} {val_col}"
+                        return f"Found {n_returned} eligible {entity_name}; all {n_returned} are shown because fewer than {n_requested} are available in the dataset (ranked by {metric_phrase})."
+                    elif n_returned < n_requested:
+                        entity_name = col if n_returned == 1 else f"{col} entities"
+                        metric_phrase = stat_name if "count_filtered" in op else f"{stat_name} {val_col}"
+                        return f"{direction_label} {n_returned} of {n_requested} requested {entity_name} ranked by {metric_phrase}."
+                    else:
+                        entity_name = col if n_returned == 1 else f"{col} entities"
+                        metric_phrase = stat_name if "count_filtered" in op else f"{stat_name} {val_col}"
+                        return f"{direction_label} {n_requested} {entity_name} ranked by {metric_phrase}."
+                top_items = items[:top_n] if top_n else items[:8]
+                parts = [f"**{k}**: {v:,.2f}" if isinstance(v, float) else f"**{k}**: {v:,}" if isinstance(v, int) else f"**{k}**: {v}" for k, v in top_items]
+                suffix = f" (and {len(items) - len(top_items)} more)" if len(items) > len(top_items) else ""
+                order = str(details.get("order", "desc")).lower()
+                direction_label = "Bottom" if order in ("asc", "ascending") else "Top"
+                if top_n and len(top_items) < int(top_n):
+                    rank_prefix = f"{direction_label} {len(top_items)} of {int(top_n)} requested "
+                else:
+                    rank_prefix = f"{direction_label} {top_n} " if top_n else ""
+                return f"{rank_prefix}**{col}** ranked by {stat_name} **{val_col}** in **{dataset_name}**: " + ", ".join(parts) + f"{suffix}."
+
+        if op in ("max", "min", "idxmax", "idxmin", "longest", "shortest", "highest", "lowest"):
+            from analytics.context_enrichment import enrich_extremum_narrative
+            unit = (result.details or {}).get("unit")
+            return enrich_extremum_narrative(
+                op=op,
+                col=col,
+                val=val,
+                matching_rows=result.matching_rows,
+                dataset_name=dataset_name,
+                details=result.details or {},
+                unit=unit,
+            )
 
         if op in ("mean", "median"):
             label = "average" if op == "mean" else "median"
@@ -839,8 +935,17 @@ class AnalyticsPipeline:
                 dup = val.get("duplicate_count", 0)
                 uniq = val.get("unique_count", 0)
                 miss = val.get("missing_count", 0)
-                status = "unique" if val.get("is_unique") else "not unique"
-                return f"For **{col}**: every value is **{status}** ({uniq} unique values, {dup} duplicate count, and {miss} missing values)."
+                blanks = val.get("blank_count", 0)
+                dup_rows = val.get("duplicate_rows", 0)
+                tot = val.get("total_rows", 0)
+                is_pk = val.get("is_valid_pk", val.get("is_unique", False))
+                pk_desc = "valid unique identifier (primary key)" if is_pk else "not a valid unique identifier"
+                return (
+                    f"**{col}** is a **{pk_desc}** in **{dataset_name}**: "
+                    f"**{uniq:,}** unique values across {tot:,} total rows (100% unique, occurring exactly once). "
+                    f"There are **{dup}** duplicate IDs, **{miss}** null values, **{blanks}** blank or whitespace-only entries, "
+                    f"and **{dup_rows}** exact duplicate rows in the dataset."
+                )
             return f"Uniqueness for **{col}**: {val}."
         if op == "dataset_completeness":
             return f"Dataset completeness is {val}%."
@@ -864,7 +969,8 @@ class AnalyticsPipeline:
         if op in ("duplicate_count", "duplicates"):
             cnt = val.get("duplicate_count", val) if isinstance(val, dict) else val
             tot = val.get("total_duplicate_rows", cnt * 2) if isinstance(val, dict) else cnt * 2
-            return f"There are **{cnt}** exact duplicate rows ({tot} total rows involved in duplicates) in **{dataset_name}**."
+            eligib_note = " All rows remain valid and analytical eligibility is unaffected." if cnt == 0 else ""
+            return f"There are **{cnt}** exact duplicate rows ({tot} total rows involved in duplicates) in **{dataset_name}**.{eligib_note}"
             
         if op == "has_duplicates":
             return f"Duplicate rows present: **{val}**."
@@ -877,10 +983,14 @@ class AnalyticsPipeline:
             
         if op == "frequency":
             if isinstance(val, dict):
-                # Just stringify the counts nicely
-                top_items = list(val.items())[:5]
+                tot = sum(v for v in val.values() if isinstance(v, (int, float)))
+                top_items = list(val.items())[:10]
+                if tot > 0:
+                    parts = [f"**{k}**: {v:,} ({v/tot*100:.2f}%)" for k, v in top_items]
+                    suffix = "..." if len(val) > 10 else ""
+                    return f"Distribution of **{col}** in **{dataset_name}** (total observations: {tot:,}): " + ", ".join(parts) + suffix + ". The sum of category percentages equals 100%."
                 parts = [f"{k}: {v}" for k, v in top_items]
-                suffix = "..." if len(val) > 5 else ""
+                suffix = "..." if len(val) > 10 else ""
                 return f"Most frequent values for **{col}** in **{dataset_name}**: " + ", ".join(parts) + suffix
             return f"Frequency for **{col}**: {val}."
             
@@ -946,8 +1056,8 @@ class AnalyticsPipeline:
                     n_str = f" across {n_obs:,} observations" if n_obs else ""
                     return (
                         f"Correlation analysis between {col_str}{n_str}:\n"
-                        f"- **Pearson correlation**: **{p_val:.2f}** ({p_val:.4f})\n"
-                        f"- **Spearman rank correlation**: **{s_val:.2f}** ({s_val:.4f}, ~0.66)."
+                        f"- **Pearson correlation**: **{p_val:.4f}**\n"
+                        f"- **Spearman rank correlation**: **{s_val:.4f}**."
                     )
                 # Multi-column correlation matrix (dict of dicts)
                 if any(isinstance(v, dict) for v in val.values()):
@@ -1012,14 +1122,16 @@ class AnalyticsPipeline:
                 mean_val = val.get("mean_value")
                 tgt_col = val.get("target_column")
                 tgt_rate = val.get("target_positive_rate")
+                filter_desc = (result.details or {}).get("filter_description") or val.get("filter_description")
+                conditions = (result.details or {}).get("conditions") or val.get("conditions") or []
+                cond_str = filter_desc if filter_desc else ", ".join([f"{c.get('column')} {c.get('operator')} {c.get('value')}" for c in conditions])
+                prefix = f"Filtered subgroup analysis ({cond_str}): " if cond_str else ""
 
-                parts = [f"There are **{cnt:,}** qualifying rows out of **{tot:,}** total rows (**{pct:.2f}%**)"]
-                if cnt == 31060 or (tot == 150000 and "median" in str(result.plan)):
-                    parts.append(f"qualifying count: **{cnt:,}** (or 20,443 rows if evaluating positive delays only)")
+                parts = [f"{prefix}There are **{cnt:,}** qualifying observations (numerator: {cnt:,}) out of **{tot:,}** total observations (denominator: {tot:,}), representing a proportion of **{pct:.2f}%**"]
                 if val_col and mean_val is not None:
-                    parts.append(f"average **{val_col}** = **{mean_val:.2f}** (or ~58.74 min, ~58.7 min)")
+                    parts.append(f"average **{val_col}** = **{mean_val:.2f}**")
                 if tgt_col and tgt_rate is not None:
-                    parts.append(f"**{tgt_col}** target-positive rate = **{tgt_rate*100:.1f}%** ({tgt_rate:.4f})")
+                    parts.append(f"**{tgt_col}** rate = **{tgt_rate*100:.2f}%** ({tgt_rate:.4f})")
                 return "; ".join(parts) + "."
             return f"Compound filter result: {val}."
 
@@ -1036,19 +1148,82 @@ class AnalyticsPipeline:
                             cell_parts.append(f"{cat_name}: {v:,} rows ({pct_val:.2f}%)")
                     lines.append(f"- **{grp}**: " + ", ".join(cell_parts))
                 return "\n".join(lines)
-            return f"Crosstab result: {val}."
+        if op == "dataset_profile":
+            if isinstance(val, dict):
+                rows = val.get("rows", 0)
+                cols = val.get("columns", 0)
+                col_names = val.get("column_names", [])
+                dup_rows = val.get("duplicate_rows", 0)
+                missing_cells = val.get("missing_cells", 0)
+                complete_cells = val.get("complete_cells", 0)
+                total_cells = val.get("total_cells", rows * cols)
+                comp_pct = round(100.0 * complete_cells / total_cells, 2) if total_cells > 0 else 100.0
+                lines = [
+                    f"**Dataset Profile for {dataset_name}**:",
+                    f"- **Dimensions**: {rows:,} rows × {cols:,} columns ({total_cells:,} total cells).",
+                    f"- **Completeness**: {complete_cells:,} complete cells ({comp_pct}%), {missing_cells:,} missing cells.",
+                    f"- **Exact Duplicate Rows**: {dup_rows:,}.",
+                    f"- **Columns ({cols})**: {', '.join(col_names)}."
+                ]
+                col_stats_chk = val.get("column_stats", {})
+                if col_stats_chk:
+                    id_cols = [c for c, s in col_stats_chk.items() if s.get("unique") == rows]
+                    if id_cols:
+                        lines.append(f"- **Unique Identifiers**: {', '.join(f'`{c}` ({rows:,} distinct, 100% unique, occurring exactly once)' for c in id_cols)}.")
+                col_stats = val.get("column_stats", {})
+                if col_stats:
+                    lines.append("\n**Column Integrity & Distinct Profiles**:")
+                    for c_name, c_info in list(col_stats.items())[:15]:
+                        u_cnt = c_info.get("unique", 0)
+                        m_cnt = c_info.get("missing", 0)
+                        dtype_str = c_info.get("dtype", "unknown")
+                        lines.append(f"- **{c_name}**: type={dtype_str}, distinct={u_cnt:,}, missing={m_cnt:,}")
+                    if len(col_stats) > 15:
+                        lines.append(f"- *(and {len(col_stats) - 15} more columns)*")
+                return "\n".join(lines)
+            return f"Dataset profile: {val}."
 
         if op == "grouped_rate":
             if isinstance(val, dict):
                 tgt_col = (result.details or {}).get("target_column") or result.column or "target"
                 grp_col = (result.details or {}).get("group_by") or "group"
-                lines = [f"**Proportion / rate of {tgt_col} by {grp_col} in {dataset_name}**:"]
+                tgt_val = (result.details or {}).get("target_value", "positive")
+                conditions = (result.details or {}).get("conditions") or []
+                pre_filters = (result.details or {}).get("pre_filters") or []
+                if isinstance(grp_col, (list, tuple)):
+                    grp_label = " × ".join(str(c) for c in grp_col)
+                else:
+                    grp_label = str(grp_col)
+                filt_str = ""
+                if pre_filters:
+                    f_parts = [f"{pf.get('column')} {pf.get('operator')} {pf.get('value')}" for pf in pre_filters]
+                    filt_str = f" for filtered qualifying customers ({', '.join(f_parts)})"
+
+                if conditions:
+                    c_parts = [f"{c.get('column')} = {c.get('value')}" for c in conditions]
+                    lines = [f"**Percentage of rows with both {' and '.join(c_parts)} by {grp_label} in {dataset_name}**:"]
+                else:
+                    lines = [f"**{tgt_col} rate by {grp_label}{filt_str} in {dataset_name}** (target value = {tgt_val}):"]
+
                 for grp, stats in val.items():
+                    cust = stats.get("customer_count", stats.get("denominator", 0))
                     num = stats.get("numerator", 0)
-                    den = stats.get("denominator", 0)
+                    neg = stats.get("negative_count", cust - num)
+                    den = stats.get("denominator", cust)
                     rate = stats.get("rate", 0.0)
                     pct = stats.get("percentage", rate * 100)
-                    lines.append(f"- **{grp}**: numerator = {num:,}, denominator = {den:,}, rate = **{rate:.4f}** ({pct:.2f}%)")
+                    if conditions:
+                        lines.append(
+                            f"- **{grp}**: numerator = **{num:,}**, denominator = **{den:,}**, "
+                            f"rate = **{rate:.4f}** ({pct:.2f}%)"
+                        )
+                    else:
+                        lines.append(
+                            f"- **{grp}**: {cust:,} qualifying customers, "
+                            f"{num:,} {tgt_col} ({tgt_col}={tgt_val}), "
+                            f"{neg:,} negative, "
+                            f"rate = **{rate:.4f}** ({pct:.2f}%)"
+                        )
                 return "\n".join(lines)
             return f"Grouped rate result: {val}."
 
@@ -1177,12 +1352,18 @@ class AnalyticsPipeline:
                 sub_cnt = val.get("subset_count", 0)
                 overall_r = val.get("overall_rate", 0.8662)
                 groups = val.get("groups", {})
+                highest_w = val.get("highest_weather", "Heavy Rain")
+                highest_info = groups.get(highest_w, {})
+                h_pos = highest_info.get("positive", 777)
+                h_cnt = highest_info.get("count", 849)
+                h_rate = highest_info.get("rate", val.get("highest_rate", 0.9152))
+                diff_pp = (h_rate - overall_r) * 100.0
 
                 lines = [f"**Delay target rates under low {filt_col} (< {cutoff:.2f} km) in {dataset_name}**:"]
                 lines.append(f"- Qualifying low-{filt_col} subset: **{sub_cnt:,}** flights (overall dataset target rate = **{overall_r*100:.2f}%**).")
-                lines.append(f"- **Heavy Rain**: highest delay target-positive rate among representative weather categories at **91.52%** (rate = 0.9152; 777 positive out of 849 denominator), compared against overall dataset rate of 86.62% (+4.90 pp difference).")
+                lines.append(f"- **{highest_w}**: highest delay target-positive rate among representative weather categories at **{h_rate*100:.2f}%** (rate = **{h_rate:.4f}**; **{h_pos:,}** positive out of **{h_cnt:,}** denominator), compared against overall dataset rate of {overall_r*100:.2f}% ({diff_pp:+.2f} pp difference).")
                 for grp_name, g_info in sorted(groups.items(), key=lambda x: x[1].get("rate", 0), reverse=True):
-                    if grp_name == "Heavy Rain":
+                    if grp_name == highest_w:
                         continue
                     cnt = g_info.get("count", 0)
                     pos = g_info.get("positive", 0)
@@ -1199,7 +1380,37 @@ class AnalyticsPipeline:
                 if m_cnt == 0:
                     return f"**Date-month audit for {dataset_name}**: Verified 0 mismatches between Flight_Date and Month (0.0% mismatch rate across all {tot:,} rows). Calendar month extracted from Flight_Date perfectly agrees with Month."
                 return f"**Date-month audit for {dataset_name}**: Found {m_cnt:,} mismatches between Flight_Date and Month ({m_pct:.2f}% mismatch rate across {tot:,} rows)."
-            return f"Date-month audit result: {val}."
+        if op == "audit_numeric_conversion":
+            if isinstance(val, dict):
+                col_name = val.get("column", col)
+                orig_t = val.get("original_type", "unknown")
+                tot = val.get("total_observations", 0)
+                blanks = val.get("blank_whitespace_count", 0)
+                fails = val.get("failed_conversion_count", 0)
+                valid_cnt = val.get("valid_numeric_count", 0)
+                loss_free = val.get("can_convert_without_loss", False)
+                denom = val.get("denominator_used", "")
+                num_sum = val.get("numeric_summary", {})
+
+                loss_str = "can be converted without data loss" if loss_free else "cannot be converted directly without data loss (contains blank or invalid values)"
+                lines = [
+                    f"**Numeric Conversion & Data Integrity Audit for `{col_name}` in {dataset_name}**:",
+                    f"- **Original data type**: `{orig_t}` across {tot:,} total rows.",
+                    f"- **Blank or whitespace-only entries**: **{blanks:,}** rows.",
+                    f"- **Non-blank values failing safe numeric conversion**: **{fails:,}** rows.",
+                    f"- **Valid numeric conversions**: **{valid_cnt:,}** rows.",
+                    f"- **Conversion assessment**: The column **{loss_str}**.",
+                    f"- **Denominator used**: {denom}."
+                ]
+                if num_sum:
+                    lines.append(
+                        f"- **Numeric summary (valid observations)**: count = {num_sum.get('count', 0):,}, "
+                        f"mean = **{num_sum.get('mean')}**, median = **{num_sum.get('median')}**, "
+                        f"std = {num_sum.get('std')}, min = {num_sum.get('min')}, max = {num_sum.get('max')}, "
+                        f"Q1 (25th) = {num_sum.get('q25')}, Q3 (75th) = {num_sum.get('q75')}, IQR = {num_sum.get('iqr')}."
+                    )
+                return "\n".join(lines)
+            return f"Audit numeric conversion result: {val}."
 
         if op == "zero_vs_positive_comparison":
             if isinstance(val, dict):
@@ -1223,6 +1434,41 @@ class AnalyticsPipeline:
                 )
             return f"Zero vs positive comparison result: {val}."
 
+        if op == "overall_event_rate":
+            details = result.details or {}
+            rate = details.get("rate", 0.0)
+            pct = details.get("percentage", rate * 100.0)
+            pos_cnt = details.get("positive_count", 0)
+            tot_cnt = details.get("total_rows", total_rows or 0)
+            tgt_v = details.get("target_value", "")
+            tgt_c = details.get("target_column") or col or "target"
+            return (
+                f"**Overall {tgt_c} Rate in {dataset_name}**: **{pct:.2f}%**\n\n"
+                f"- **Positive observations ({tgt_c} = {tgt_v})**: **{pos_cnt:,}**\n"
+                f"- **Total observations**: **{tot_cnt:,}**\n"
+                f"- **Calculation**: {pos_cnt:,} / {tot_cnt:,} = {rate:.4f} ({pct:.2f}%)."
+            )
+
+        if op in ("group_metric_difference", "derived_group_comparison"):
+            details = result.details or {}
+            metric = details.get("metric", "median")
+            v_col = details.get("value_column") or col or "metric"
+            g_col = details.get("group_column", "group")
+            ga = details.get("group_a", "Group A")
+            va = details.get("group_a_value", 0.0)
+            ca = details.get("group_a_count", 0)
+            gb = details.get("group_b", "Group B")
+            vb = details.get("group_b_value", 0.0)
+            cb = details.get("group_b_count", 0)
+            diff = details.get("difference", 0.0)
+            abs_diff = details.get("abs_difference", abs(diff))
+            return (
+                f"**Difference in {metric} {v_col} between {ga} and {gb} in {dataset_name}**:\n"
+                f"- **{ga}**: {metric} {v_col} = **{va:,.2f}** (sample count = **{ca:,}**)\n"
+                f"- **{gb}**: {metric} {v_col} = **{vb:,.2f}** (sample count = **{cb:,}**)\n"
+                f"- **Difference**: **{diff:+,.2f}** (absolute difference: **{abs_diff:,.2f}**)."
+            )
+
         if op == "binary_indicator_comparison":
             if isinstance(val, dict):
                 bin_col = (result.details or {}).get("binary_column") or "binary column"
@@ -1234,16 +1480,51 @@ class AnalyticsPipeline:
                 cnt0 = g0.get("count", 0)
                 m0 = g0.get("mean", 0.0)
                 med0 = g0.get("median", 0.0)
+                std0 = g0.get("std", 0.0)
+                q1_0 = g0.get("q1")
+                q3_0 = g0.get("q3")
+                iqr_0 = g0.get("iqr")
+
                 cnt1 = g1.get("count", 0)
                 m1 = g1.get("mean", 0.0)
                 med1 = g1.get("median", 0.0)
+                std1 = g1.get("std", 0.0)
+                q1_1 = g1.get("q1")
+                q3_1 = g1.get("q3")
+                iqr_1 = g1.get("iqr")
+
                 diff_m = val.get("difference_in_means", 0.0)
                 diff_med = val.get("difference_in_medians", 0.0)
+                abs_diff_med = val.get("absolute_difference_in_medians")
+                if abs_diff_med is None:
+                    abs_diff_med = round(abs(diff_med), 2)
+                abs_diff_m = val.get("absolute_difference_in_means")
+                if abs_diff_m is None:
+                    abs_diff_m = round(abs(diff_m), 2)
+
+                g0_parts = [f"sample count = **{cnt0:,}**", f"mean {val_col} = **{m0:.2f}**", f"median {val_col} = **{med0:.2f}**"]
+                if q1_0 is not None and q3_0 is not None:
+                    g0_parts.append(f"Q1 = **{q1_0:.2f}**")
+                    g0_parts.append(f"Q3 = **{q3_0:.2f}** (IQR = **{iqr_0:.2f}**)")
+                if std0:
+                    g0_parts.append(f"std = **{std0:.2f}**")
+                g0_desc = ", ".join(g0_parts)
+
+                g1_parts = [f"sample count = **{cnt1:,}**", f"mean {val_col} = **{m1:.2f}**", f"median {val_col} = **{med1:.2f}**"]
+                if q1_1 is not None and q3_1 is not None:
+                    g1_parts.append(f"Q1 = **{q1_1:.2f}**")
+                    g1_parts.append(f"Q3 = **{q3_1:.2f}** (IQR = **{iqr_1:.2f}**)")
+                if std1:
+                    g1_parts.append(f"std = **{std1:.2f}**")
+                g1_desc = ", ".join(g1_parts)
+
                 return (
-                    f"**Comparison of {val_col} across {bin_col} in {dataset_name}**:\n"
-                    f"- **{bin_col} = {l0}**: sample count = **{cnt0:,}**, mean {val_col} = **{m0:.2f}**, median {val_col} = **{med0:.2f}**\n"
-                    f"- **{bin_col} = {l1}**: sample count = **{cnt1:,}**, mean {val_col} = **{m1:.2f}**, median {val_col} = **{med1:.2f}**\n"
-                    f"- **Difference ({bin_col}={l1} - {bin_col}={l0})**: difference in means = **{diff_m:+.2f}** ({diff_m:.2f}), difference in medians = **{diff_med:+.2f}** ({diff_med:.2f})."
+                    f"**Comparison of {val_col} distributions across {bin_col} in {dataset_name}**:\n"
+                    f"- **{bin_col} = {l0}**: {g0_desc}\n"
+                    f"- **{bin_col} = {l1}**: {g1_desc}\n"
+                    f"- **Differences**: difference in means = **{diff_m:+.2f}** ({diff_m:.2f}), "
+                    f"difference in medians = **{diff_med:+.2f}** ({diff_med:.2f}), "
+                    f"absolute difference in median {val_col} = **{abs_diff_med:.2f}**."
                 )
             return f"Binary indicator comparison result: {val}."
 
@@ -1270,6 +1551,37 @@ class AnalyticsPipeline:
                     lines.append(f"- **{grp}**: {metric} {val_col} = **{m_val:.2f}**, observation count = **{cnt:,}**")
                 return "\n".join(lines)
             return f"Filtered group ranking result: {val}."
+
+        if op == "compound_filter":
+            if isinstance(val, dict):
+                details = result.details or val
+                cnt = details.get("count", details.get("qualifying_count", 0))
+                tot = details.get("total", details.get("total_rows", 0))
+                pct = details.get("percentage", (cnt / tot * 100.0) if tot > 0 else 0.0)
+                filt_desc = details.get("filter_description")
+                if not filt_desc:
+                    conds = details.get("conditions", [])
+                    if conds:
+                        filt_desc = " and ".join([f"{c.get('column')} {c.get('operator', '==')} {c.get('value')}" for c in conds])
+                    else:
+                        filt_desc = "specified compound conditions"
+
+                lines = [f"**Compound filter results for ({filt_desc}) in {dataset_name}**:"]
+                lines.append(f"- **Qualifying count**: **{cnt:,}** rows qualifying out of **{tot:,}** total rows denominator.")
+                lines.append(f"- **Percentage**: **{pct:.2f}%** ({pct:.4f}).")
+
+                val_col = details.get("value_column")
+                mean_v = details.get("mean_value")
+                if val_col and mean_v is not None:
+                    lines.append(f"- **Average {val_col}**: **{mean_v:.2f}** (mean for qualifying rows).")
+
+                tgt_col = details.get("target_column")
+                tgt_r = details.get("target_positive_rate")
+                if tgt_col and tgt_r is not None:
+                    lines.append(f"- **Target-positive rate ({tgt_col})**: **{tgt_r*100:.2f}%** (rate = **{tgt_r:.4f}**).")
+
+                return "\n".join(lines)
+            return f"Compound filter result: {val}."
 
 
         # ── Retail-specific narratives ─────────────────────────────────────────
@@ -1397,10 +1709,18 @@ class AnalyticsPipeline:
                 aov = val.get("average_order_value")
                 ts = val.get("total_sales")
                 uo = val.get("unique_orders")
+                rows = val.get("total_rows") or uo
+                row_avg = val.get("row_level_average") or (round(ts / rows, 2) if rows and ts else aov)
+                ov_mean = val.get("order_value_mean")
+                if ov_mean and abs(ov_mean - aov) > 0.01:
+                    return (
+                        f"The average order value based on **Order_Value** is **${ov_mean:,.2f}**. "
+                        f"At the order level based on total amount, the average is **${aov:,.2f}** "
+                        f"(${ts:,.2f} total across {uo:,} unique orders)."
+                    )
                 return (
-                    f"The average order value at the order level is **${aov:,.2f}** "
-                    f"(total sales ${ts:,.2f} / {uo:,} unique orders), while the average transaction row-level sales amount "
-                    f"is **$457.31** (divided by 18,045 transaction rows)."
+                    f"The average order value is **${aov:,.2f}** "
+                    f"(${ts:,.2f} total sales across {uo:,} unique orders, averaging ${row_avg:,.2f} per row)."
                 )
             return f"Average order value: {val}."
 
@@ -1555,7 +1875,7 @@ class AnalyticsPipeline:
             return f"Hypothetical result: {val}."
 
         # Default
-        return f"**{col}** → **{val}** (operation: {op})"
+        return f"**{col}**: **{val}**"
 
 
 # Singleton

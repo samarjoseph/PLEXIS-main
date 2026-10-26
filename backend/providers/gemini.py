@@ -33,7 +33,8 @@ def _get_genai_client(api_key: str):
         ) from e
 
     try:
-        client = _genai.Client(api_key=api_key)
+        http_opts = _types.HttpOptions(timeout=10000) if hasattr(_types, 'HttpOptions') else None
+        client = _genai.Client(api_key=api_key, http_options=http_opts)
         return client, _genai
     except Exception as e:
         raise RuntimeError(f"Failed to construct google.genai.Client: {e}") from e
@@ -95,8 +96,9 @@ class GeminiProvider(IProviderAdapter):
             )
 
     def _convert_messages(self, messages: list) -> str:
-        """Convert messages list to a prompt string."""
-        return "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages])
+        """Convert messages list to a prompt string, excluding system messages to avoid duplication."""
+        non_system = [m for m in messages if m.get('role') != 'system']
+        return "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in non_system])
 
     def _map_exception(self, e: Exception) -> Exception:
         """Map SDK exception to internal Provider errors."""
@@ -132,7 +134,8 @@ class GeminiProvider(IProviderAdapter):
                 return gemini_models[0].model_name
         except Exception as exc:
             logger.warning('[GeminiProvider] model_registry lookup failed: %s', exc)
-        return 'gemini-2.0-flash'
+        from config import Config
+        return Config.TRANSFORMATION_GEMINI_MODEL
 
     def generate(self, request: AIRequest, api_key: Optional[str] = None) -> ProviderResponse:
         """Generate text using Gemini, governed by AIRequest."""
@@ -143,10 +146,16 @@ class GeminiProvider(IProviderAdapter):
             prompt = self._convert_messages(request.messages) if request.messages else request.task
             model_name = self._get_model_for_request(request)
 
+            system_instruction = request.system_prompt
+            if not system_instruction and request.messages:
+                system_msgs = [m.get('content', '') for m in request.messages if m.get('role') == 'system']
+                if system_msgs:
+                    system_instruction = "\n\n".join(system_msgs)
+
             response_mime_type = 'application/json' if request.json_mode else 'text/plain'
 
             config = _types.GenerateContentConfig(
-                system_instruction=request.system_prompt,
+                system_instruction=system_instruction,
                 temperature=request.temperature,
                 max_output_tokens=request.max_tokens or 8192,
                 response_mime_type=response_mime_type
@@ -191,8 +200,10 @@ class GeminiProvider(IProviderAdapter):
                 sc = 429
             elif sc is None and ('401' in str(e) or '403' in str(e) or 'UNAUTHENTICATED' in str(e)):
                 sc = 401
+            elif sc is None and ('504' in str(e) or 'DEADLINE_EXCEEDED' in str(e) or 'timeout' in str(e).lower()):
+                sc = 504
             return ProviderResponse(
-                text='', model="unknown", provider=self.provider_name,
+                text='', model=model_name if 'model_name' in locals() else 'unknown', provider=self.provider_name,
                 success=False, error=str(mapped_error),
                 status_code=sc
             )
@@ -206,8 +217,14 @@ class GeminiProvider(IProviderAdapter):
             prompt = self._convert_messages(request.messages) if request.messages else request.task
             model_name = self._get_model_for_request(request)
 
+            system_instruction = request.system_prompt
+            if not system_instruction and request.messages:
+                system_msgs = [m.get('content', '') for m in request.messages if m.get('role') == 'system']
+                if system_msgs:
+                    system_instruction = "\n\n".join(system_msgs)
+
             config = _types.GenerateContentConfig(
-                system_instruction=request.system_prompt,
+                system_instruction=system_instruction,
                 temperature=request.temperature,
                 max_output_tokens=request.max_tokens or 8192,
             )

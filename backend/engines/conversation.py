@@ -204,8 +204,10 @@ class ConversationEngine(BaseEngine):
         )
 
         if response.success:
+            from utils.text_sanitizer import strip_thinking_and_internal_reasoning
+            clean_answer = strip_thinking_and_internal_reasoning(response.text)
             return EngineResult(
-                answer=response.text,
+                answer=clean_answer,
                 source='conversation',
                 provider=response.provider,
                 success=True,
@@ -261,22 +263,41 @@ class ConversationEngine(BaseEngine):
         # Extract deterministic dataset schema context
         schema_profile = getattr(context, 'schema_profile', None)
         dataset_id = getattr(context, 'dataset_id', None)
-        dataset_version = None
         schema_context = None
-        
-        if schema_profile and isinstance(schema_profile, dict):
-            # The schema_profile is usually a dict containing 'columns' and 'types'
-            schema_context = {
-                "dataset_id": str(dataset_id) if dataset_id else "unknown",
-                "schema": list(schema_profile.keys()) if isinstance(schema_profile, dict) and not 'columns' in schema_profile else schema_profile.get('columns', [])
-            }
-            # Depending on how schema_profile is structured in Plexis...
-            # A common structure is {"columns": ["id", "name"], "types": {...}} or just {"id": "int", ...}
-            if isinstance(schema_profile, dict):
+
+        if not schema_profile and dataset_id:
+            try:
+                from datasets.registry import dataset_registry
+                entry = dataset_registry.get(str(dataset_id))
+                if entry:
+                    schema_profile = getattr(entry, 'schema_profile', None)
+            except Exception as e:
+                logger.debug(f"[ConversationEngine] Error fetching schema_profile: {e}")
+
+        if schema_profile:
+            columns = []
+            column_types = {}
+            if isinstance(schema_profile, list):
+                for col in schema_profile:
+                    if isinstance(col, dict) and 'name' in col:
+                        c_name = str(col['name'])
+                        columns.append(c_name)
+                        column_types[c_name] = str(col.get('dtype', 'unknown'))
+            elif isinstance(schema_profile, dict):
                 if 'columns' in schema_profile:
-                    schema_context['schema'] = schema_profile['columns']
+                    columns = [str(c) for c in schema_profile['columns']]
                 else:
-                    schema_context['schema'] = list(schema_profile.keys())
+                    columns = [str(k) for k in schema_profile.keys()]
+                column_types = {str(k): str(v) for k, v in schema_profile.get('types', {}).items()}
+
+            if columns:
+                schema_context = {
+                    "dataset_id": str(dataset_id) if dataset_id else "unknown",
+                    "columns": columns,
+                    "column_types": column_types,
+                    "schema": columns,
+                    "column_count": len(columns),
+                }
 
         # Build the structured context block for the LLM
         context_block = build_context_block(
@@ -296,12 +317,15 @@ class ConversationEngine(BaseEngine):
                 messages=[{"role": "user", "content": context_block}],
                 system_prompt=system_prompt,
                 temperature=0.75,
+                max_tokens=600,
             )
         )
 
-        if response.success:
+        if response.success and response.text and response.text.strip():
+            from utils.text_sanitizer import strip_thinking_and_internal_reasoning
+            cleaned_text = strip_thinking_and_internal_reasoning(response.text)
             return EngineResult(
-                answer=response.text,
+                answer=cleaned_text,
                 source='conversation',
                 provider=response.provider,
                 success=True,
@@ -309,6 +333,22 @@ class ConversationEngine(BaseEngine):
             )
         else:
             logger.warning(f"Conversation engine generation failed: {response.error}")
+            # ── Preserve grounded answers when LLM provider is unavailable ──
+            # If the router already produced a direct_answer (e.g. column-not-found,
+            # schema info, or analytical narrative), return it instead of the
+            # generic error stub.
+            route_payload = getattr(context, 'route_payload', None) or {}
+            direct_answer = route_payload.get('direct_answer')
+            if not direct_answer:
+                direct_answer = getattr(context, 'direct_answer', None)
+            if direct_answer and isinstance(direct_answer, str) and direct_answer.strip():
+                return EngineResult(
+                    answer=direct_answer,
+                    source='conversation',
+                    provider='system',
+                    success=True,
+                    should_compose=False,
+                )
             return EngineResult(
                 answer="Sorry, I ran into an issue generating a response. Try again?",
                 source='conversation',

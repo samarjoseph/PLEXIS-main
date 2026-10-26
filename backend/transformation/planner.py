@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -25,12 +26,14 @@ class TransformationClarificationRequired(ValueError):
     """A valid transformation is missing a required, user-selectable slot."""
 
     def __init__(self, message: str, *, missing_slots: list[str], candidate_columns=None,
-                 clarification_type: str = 'COLUMN_SCOPE', operation_payload: dict | None = None):
+                 clarification_type: str = 'COLUMN_SCOPE', operation_payload: dict | None = None,
+                 ambiguous_options: list | None = None):
         super().__init__(message)
         self.missing_slots = list(missing_slots)
         self.candidate_columns = list(candidate_columns or [])
         self.clarification_type = clarification_type
         self.operation_payload = operation_payload
+        self.ambiguous_options = list(ambiguous_options or [])
 
 
 class ValueTypeMismatchConfirmationRequired(ValueError):
@@ -96,17 +99,44 @@ ALLOWED_OPERATIONS = frozenset({
     'CAST_DTYPE',
     'REPLACE_VALUES',
     'SORT_ROWS',
+    'CLIP',
+    'UPDATE_EXTREMUM',
+    'EXTREME_VALUE_AMBIGUITY',
 })
 
 
 def _compute_fingerprint(df: pd.DataFrame) -> str:
-    """Compute a lightweight fingerprint of a DataFrame for staleness detection."""
-    buf = io.StringIO()
-    df.to_csv(buf, index=False)
-    return hashlib.sha256(buf.getvalue().encode()).hexdigest()[:32]
+    """Compute a lightweight, ultra-fast fingerprint of a DataFrame for staleness detection (< 2ms)."""
+    if df is None or not isinstance(df, pd.DataFrame):
+        return ""
+    n = len(df)
+    cols = list(df.columns)
+    dtypes = [str(d) for d in df.dtypes]
+    if n <= 30:
+        sample_vals = [tuple(df.iloc[i].values) for i in range(n)]
+    else:
+        sample_indices = list(range(10)) + list(range(n // 2 - 5, n // 2 + 5)) + list(range(n - 10, n))
+        sample_vals = [tuple(df.iloc[i].values) for i in sample_indices]
+    sig = f"{n}:{cols}:{dtypes}:{sample_vals}"
+    return hashlib.sha256(sig.encode('utf-8', errors='replace')).hexdigest()[:32]
 
 
 class TransformationPlanner:
+
+    def _resolve_column_name(self, df: pd.DataFrame, col_name: str) -> Optional[str]:
+        if not col_name:
+            return None
+        if col_name in df.columns:
+            return col_name
+        col_lower = {c.lower(): c for c in df.columns}
+        if col_name.lower() in col_lower:
+            return col_lower[col_name.lower()]
+        norm = lambda s: re.sub(r'[\s_-]+', '', str(s).lower())
+        target_norm = norm(col_name)
+        for c in df.columns:
+            if norm(c) == target_norm:
+                return c
+        return None
 
     def plan(
         self,
@@ -153,6 +183,12 @@ class TransformationPlanner:
             return self._plan_replace_values(df, operation, plan_id, dataset_id, fingerprint)
         elif op_type == 'SORT_ROWS':
             return self._plan_sort_rows(df, operation, plan_id, dataset_id, fingerprint)
+        elif op_type == 'CLIP':
+            return self._plan_clip(df, operation, plan_id, dataset_id, fingerprint)
+        elif op_type == 'UPDATE_EXTREMUM':
+            return self._plan_update_extremum(df, operation, plan_id, dataset_id, fingerprint)
+        elif op_type == 'EXTREME_VALUE_AMBIGUITY':
+            return self._plan_extreme_ambiguity(df, operation, plan_id, dataset_id, fingerprint)
         else:
             raise ValueError(f"Unhandled operation: {op_type}")
 
@@ -486,6 +522,14 @@ class TransformationPlanner:
         scope = op.get('scope') or {}
         old_val = op.get('old_value')
         new_val = op.get('new_value')
+        from transformation.validator import AGGREGATION_OPERATOR_WORDS
+        old_str = str(old_val).strip().lower() if old_val is not None else ''
+        was_quoted = op.get('_old_was_quoted', False)
+        if old_str in AGGREGATION_OPERATOR_WORDS and not was_quoted:
+            raise ValueError(
+                f"Cannot use aggregation/comparative term '{old_val}' as a literal value to replace. "
+                f"To modify extreme values, specify whether to cap the column or update only the maximal/minimal record."
+            )
 
         # Reconstruct TypedLiteral from _old_typed metadata if available (set by router)
         from datasets.semantics.typed_literal import TypedLiteral, build_mask, parse_literal
@@ -523,6 +567,15 @@ class TransformationPlanner:
                 new_lit = TypedLiteral(str(new_val), 'string', str(new_val), False, False)
             new_val = new_lit.python_value
         
+        if column:
+            resolved_col = self._resolve_column_name(df, column)
+            if resolved_col and pd.api.types.is_numeric_dtype(df[resolved_col].dtype):
+                if old_lit.value_type == 'string' and not was_quoted:
+                    raise ValueError(
+                        f"Cannot replace string value '{old_val}' in numeric column '{resolved_col}'. "
+                        f"If you intended an extreme-value operation, please specify capping or extremum update."
+                    )
+
         op_old_raw = op.get('_old_raw')
         op_old_was_quoted = op.get('_old_was_quoted', False)
         
@@ -605,6 +658,19 @@ class TransformationPlanner:
             if len(matching_cols) == 1 and not op.get('_require_scope_selection'):
                 column = matching_cols[0]
             elif len(matching_cols) == 0:
+                from transformation.mismatch import find_mismatch_candidate
+                candidate_old_lit = find_mismatch_candidate(df, old_lit, list(df.columns))
+                if candidate_old_lit:
+                    matching_mismatch_cols = [c for c in df.columns if build_mask(df[c], candidate_old_lit).any()]
+                    raise ValueTypeMismatchConfirmationRequired(
+                        f"I couldn't find any {old_lit.value_type} values matching your request.",
+                        requested_value_info=old_lit.to_dict(),
+                        candidate_value_info=candidate_old_lit.to_dict(),
+                        candidate_columns=matching_mismatch_cols,
+                        candidate_count=len(matching_mismatch_cols),
+                        operation_payload=op,
+                    )
+
                 type_hint = old_lit.display_label()
                 return TransformationPlan(
                     plan_id=plan_id, dataset_id=dataset_id,
@@ -729,6 +795,238 @@ class TransformationPlanner:
             affected_columns=[column], before_sample=sample,
             dataset_fingerprint=fingerprint,
             created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+    def _plan_clip(self, df: pd.DataFrame, op: Dict[str, Any], plan_id: str, dataset_id: str, fingerprint: str) -> TransformationPlan:
+        raw_col = op.get('column')
+        if raw_col is None or str(raw_col).strip().lower() in ('', 'none', 'null'):
+            raise ValueError("Target column is required for CLIP operation. Please specify which column to clip.")
+        col = self._resolve_column_name(df, raw_col)
+        if not col:
+            raise ValueError(f"Column '{raw_col}' not found in dataset.")
+
+        num_series = pd.to_numeric(df[col], errors='coerce')
+        if num_series.dropna().empty:
+            raise ValueError(f"Cannot apply CLIP to non-numeric column '{col}'.")
+
+        min_val = op.get('min')
+        max_val = op.get('max')
+        if min_val is None and max_val is None:
+            raise ValueError(f"CLIP operation on '{col}' requires at least one of 'min' or 'max'.")
+        if min_val is not None and max_val is not None and min_val > max_val:
+            raise ValueError(f"CLIP 'min' ({min_val}) cannot be greater than 'max' ({max_val}).")
+
+        mask = pd.Series(False, index=df.index)
+        if max_val is not None:
+            mask |= (num_series > max_val)
+        if min_val is not None:
+            mask |= (num_series < min_val)
+
+        affected_count = int(mask.sum())
+        samples = []
+        for idx in df[mask].head(20).index:
+            orig_val = df.loc[idx, col]
+            num_val = num_series.loc[idx]
+            if max_val is not None and num_val > max_val:
+                new_val = max_val
+            else:
+                new_val = min_val
+            samples.append(AffectedCell(
+                row_index=int(idx),
+                source_row_number=int(idx) + 1,
+                column=col,
+                before=orig_val,
+                after=new_val,
+            ))
+
+        if min_val is not None and max_val is not None:
+            label = f"Clip '{col}' between {min_val} and {max_val}"
+            code = f"df['{col}'] = df['{col}'].clip(lower={min_val}, upper={max_val})"
+        elif max_val is not None:
+            label = f"Cap '{col}' at {max_val}"
+            code = f"df['{col}'] = df['{col}'].clip(upper={max_val})"
+        else:
+            label = f"Floor '{col}' at {min_val}"
+            code = f"df['{col}'] = df['{col}'].clip(lower={min_val})"
+
+        payload = dict(op)
+        payload['column'] = col
+        payload['affected_count'] = affected_count
+        expected_ext = {}
+        if max_val is not None:
+            expected_ext['max'] = max_val
+        if min_val is not None:
+            expected_ext['min'] = min_val
+        payload['expected_extremum'] = expected_ext
+
+        return TransformationPlan(
+            plan_id=plan_id,
+            dataset_id=dataset_id,
+            operation_type='CLIP',
+            operation_label=label,
+            operation_code=code,
+            operation_payload=payload,
+            affected_rows_count=affected_count,
+            affected_cells_count=affected_count,
+            affected_columns=[col],
+            before_sample=samples,
+            dataset_fingerprint=fingerprint,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _plan_update_extremum(self, df: pd.DataFrame, op: Dict[str, Any], plan_id: str, dataset_id: str, fingerprint: str) -> TransformationPlan:
+        raw_col = op.get('column')
+        if raw_col is None or str(raw_col).strip().lower() in ('', 'none', 'null'):
+            raise ValueError("Target column is required for UPDATE_EXTREMUM. Please specify which column to update.")
+        col = self._resolve_column_name(df, raw_col)
+        if not col:
+            raise ValueError(f"Column '{raw_col}' not found in dataset.")
+
+        extremum = str(op.get('extremum', 'max')).lower()
+        if extremum not in ('max', 'min'):
+            raise ValueError(f"Invalid extremum '{extremum}'. Must be 'max' or 'min'.")
+
+        new_val = op.get('new_value')
+        if new_val is None:
+            raise ValueError("UPDATE_EXTREMUM requires 'new_value'.")
+
+        try:
+            import duckdb
+            con = duckdb.connect(':memory:')
+            con.register('df_view', df)
+            agg_fn = 'MAX' if extremum == 'max' else 'MIN'
+            curr_ext = con.execute(f'SELECT {agg_fn}("{col}") FROM df_view').fetchone()[0]
+            con.close()
+            num_series = pd.to_numeric(df[col], errors='coerce')
+        except Exception:
+            num_series = pd.to_numeric(df[col], errors='coerce')
+            if num_series.dropna().empty:
+                raise ValueError(f"Cannot update extremum in non-numeric column '{col}'.")
+            curr_ext = num_series.max() if extremum == 'max' else num_series.min()
+        if pd.isna(curr_ext):
+            raise ValueError(f"No numeric values available in column '{col}'.")
+
+        if pd.api.types.is_integer_dtype(num_series.dropna().dtype):
+            curr_ext = int(curr_ext)
+            if isinstance(new_val, (int, float)) and int(new_val) == new_val:
+                new_val = int(new_val)
+
+        mask = (num_series == curr_ext)
+        affected_count = int(mask.sum())
+
+        samples = []
+        for idx in df[mask].head(20).index:
+            samples.append(AffectedCell(
+                row_index=int(idx),
+                source_row_number=int(idx) + 1,
+                column=col,
+                before=df.loc[idx, col],
+                after=new_val,
+            ))
+
+        remaining = num_series[~mask].dropna()
+        if not remaining.empty:
+            rem_ext = remaining.max() if extremum == 'max' else remaining.min()
+            new_ext = max(new_val, rem_ext) if extremum == 'max' else min(new_val, rem_ext)
+        else:
+            new_ext = new_val
+
+        ext_name = "maximum" if extremum == 'max' else "minimum"
+        label = f"Change {ext_name} value ({curr_ext}) to {new_val} in '{col}'"
+        code = f"# change {ext_name} in '{col}' to {new_val}\nmask = df['{col}'] == {curr_ext}\ndf.loc[mask, '{col}'] = {new_val}"
+
+        payload = dict(op)
+        payload['column'] = col
+        payload['extremum'] = extremum
+        payload['current_extremum'] = curr_ext
+        payload['new_value'] = new_val
+        payload['expected_extremum'] = {extremum: new_ext}
+
+        return TransformationPlan(
+            plan_id=plan_id,
+            dataset_id=dataset_id,
+            operation_type='UPDATE_EXTREMUM',
+            operation_label=label,
+            operation_code=code,
+            operation_payload=payload,
+            affected_rows_count=affected_count,
+            affected_cells_count=affected_count,
+            affected_columns=[col],
+            before_sample=samples,
+            dataset_fingerprint=fingerprint,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+    def _plan_extreme_ambiguity(self, df: pd.DataFrame, op: Dict[str, Any], plan_id: str, dataset_id: str, fingerprint: str) -> TransformationPlan:
+        raw_col = op.get('column')
+        if raw_col is None or str(raw_col).strip().lower() in ('', 'none', 'null'):
+            raise ValueError("Target column is required for extreme value operation. Please specify which column to change.")
+        col = self._resolve_column_name(df, raw_col)
+        if not col:
+            raise ValueError(f"Column '{raw_col}' not found in dataset.")
+
+        extremum = str(op.get('extremum', 'max')).lower()
+        target_val = op.get('target_value')
+        if target_val is None:
+            raise ValueError("Target value is required for extreme value operation.")
+
+        try:
+            import duckdb
+            con = duckdb.connect(':memory:')
+            con.register('df_view', df)
+            agg_fn = 'MAX' if extremum == 'max' else 'MIN'
+            curr_ext = con.execute(f'SELECT {agg_fn}("{col}") FROM df_view').fetchone()[0]
+            con.close()
+            num_series = pd.to_numeric(df[col], errors='coerce').dropna()
+        except Exception:
+            num_series = pd.to_numeric(df[col], errors='coerce').dropna()
+            if num_series.empty:
+                raise ValueError(f"Column '{col}' contains no numeric values.")
+            curr_ext = num_series.max() if extremum == 'max' else num_series.min()
+        if pd.api.types.is_integer_dtype(num_series.dtype):
+            curr_ext = int(curr_ext)
+            if isinstance(target_val, (int, float)) and int(target_val) == target_val:
+                target_val = int(target_val)
+
+        ext_word = "maximum" if extremum == 'max' else "minimum"
+        if extremum == 'max':
+            opt1 = {
+                'action': 'CAP_UPPER',
+                'label': f"Cap all values above {target_val} at {target_val}",
+                'description': f"Values > {target_val} will be capped at {target_val}; lower values remain unchanged.",
+                'operation': {'type': 'CLIP', 'column': col, 'max': target_val}
+            }
+            opt2 = {
+                'action': 'UPDATE_EXTREMUM',
+                'label': f"Change only the maximum record(s) ({curr_ext}) to {target_val}",
+                'description': f"Only row(s) where {col} is currently {curr_ext} will be changed to {target_val}.",
+                'operation': {'type': 'UPDATE_EXTREMUM', 'column': col, 'extremum': 'max', 'new_value': target_val}
+            }
+            question = f"Do you want to cap all values above {target_val} at {target_val}, or change only the record(s) with the current maximum ({curr_ext}) to {target_val}?"
+        else:
+            opt1 = {
+                'action': 'FLOOR_LOWER',
+                'label': f"Floor all values below {target_val} at {target_val}",
+                'description': f"Values < {target_val} will be floored at {target_val}; higher values remain unchanged.",
+                'operation': {'type': 'CLIP', 'column': col, 'min': target_val}
+            }
+            opt2 = {
+                'action': 'UPDATE_EXTREMUM',
+                'label': f"Change only the minimum record(s) ({curr_ext}) to {target_val}",
+                'description': f"Only row(s) where {col} is currently {curr_ext} will be changed to {target_val}.",
+                'operation': {'type': 'UPDATE_EXTREMUM', 'column': col, 'extremum': 'min', 'new_value': target_val}
+            }
+            question = f"Do you want to floor all values below {target_val} at {target_val}, or change only the record(s) with the current minimum ({curr_ext}) to {target_val}?"
+
+        raise TransformationClarificationRequired(
+            question,
+            missing_slots=['clarify_extreme_intent'],
+            candidate_columns=[col],
+            clarification_type='EXTREME_VALUE_AMBIGUITY',
+            operation_payload=op,
+            ambiguous_options=[opt1, opt2]
         )
 
 

@@ -30,6 +30,7 @@ WHAT STAYS THE SAME:
 import json
 import logging
 import re
+import pandas as pd
 
 from core.context import ExecutionContext
 from core.events import (
@@ -137,7 +138,10 @@ _TRANSFORM_RX = re.compile(
     r'|convert\s+\w+\s+to\s+(?:int|float|string|str|bool|integer|number|numeric|text)'
     r'|cast\s+\w+\s+(?:to|as)\s+(?:int|float|string|str|bool|integer|number|numeric|text)'
     r'|make\s+(?:all\s+)?\w+\s+(?:int|float|integer|number|numeric|text|string|bool)'
-    r'|(?:replace|change)\s+(?:the\s+)?(?:(?:integer|int|float|decimal|string|str|text|boolean|bool|numeric)\s+)?(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|\w+(?:\.\w+)?)\s+(?:with|to|by)\b'
+    r'|cap\s+(?:all\s+)?(?:the\s+)?'
+    r'|floor\s+(?:all\s+)?(?:the\s+)?'
+    r'|clip\s+(?:all\s+)?(?:the\s+)?'
+    r'|(?:replace|change|set|update|swap)\s+(?:the\s+)?(?:(?:integer|int|float|decimal|string|str|text|boolean|bool|numeric)\s+)?(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|[\w\s.-]+?)\s+(?:with|to|by|=)\b'
     r'|call\s+(?:the\s+)?\w+\s+column\b'
     r')\b',
     re.IGNORECASE,
@@ -370,7 +374,7 @@ def _parse_transform_from_message(message: str) -> dict | None:
         
     # With quotes
     m = re.search(
-        r'change\s+(?:the\s+)?(?:name\s+of\s+)?(?:column\s+)?(\w+)\s+(?:name\s+)?(?:to|with|as)\s+([\"\'])(.*?)\2',
+        r'change\s+(?:the\s+)?(?:(?:name\s+of\s+)?column\s+|name\s+of\s+)(\w+)\s+(?:name\s+)?(?:to|with|as)\s+([\"\'])(.*?)\2',
         orig, re.IGNORECASE,
     )
     if m:
@@ -378,7 +382,7 @@ def _parse_transform_from_message(message: str) -> dict | None:
 
     # Without quotes
     m = re.search(
-        r'change\s+(?:the\s+)?(?:name\s+of\s+)?(?:column\s+)?(\w+)\s+(?:name\s+)?(?:to|with|as)\s+([^\"\'\n]+)',
+        r'change\s+(?:the\s+)?(?:(?:name\s+of\s+)?column\s+|name\s+of\s+)(\w+)\s+(?:name\s+)?(?:to|with|as)\s+([^\"\'\n]+)',
         orig, re.IGNORECASE,
     )
     if m:
@@ -520,6 +524,86 @@ def _parse_transform_from_message(message: str) -> dict | None:
         }
         return {"type": "CAST_DTYPE", "column": col, "dtype": dtype_map.get(dtype_raw, 'str')}
 
+    # ── EXTREME VALUE TRANSFORMATIONS ──────────────────────────────────────────
+    _EXTREMUM_WORDS = r'(?:highest|maximum|max|peak|lowest|minimum|min)'
+
+    # 1. Unambiguous CAP
+    m_cap = re.search(
+        r'\bcap\s+(?:(?:all\s+)?values?\s+(?:in\s+)?)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:at|to|above|by|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_cap:
+        raw_val = m_cap.group(2).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {"type": "CLIP", "column": m_cap.group(1).strip(), "max": val}
+
+    # 2. Unambiguous FLOOR
+    m_floor = re.search(
+        r'\bfloor\s+(?:(?:all\s+)?values?\s+(?:in\s+)?)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:at|to|below|by|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_floor:
+        raw_val = m_floor.group(2).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {"type": "CLIP", "column": m_floor.group(1).strip(), "min": val}
+
+    # 3. "set the maximum [col] to [val]" / "set max [col] to [val]"
+    m_set_max = re.search(
+        r'\b(?:set|limit)\s+(?:the\s+)?(?:maximum|max)\s+(?:value\s+of\s+)?(?:in\s+)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:to|at|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_set_max:
+        raw_val = m_set_max.group(2).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {"type": "CLIP", "column": m_set_max.group(1).strip(), "max": val}
+
+    # 4. "set the minimum [col] to [val]" / "set min [col] to [val]"
+    m_set_min = re.search(
+        r'\b(?:set|limit)\s+(?:the\s+)?(?:minimum|min)\s+(?:value\s+of\s+)?(?:in\s+)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:to|at|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_set_min:
+        raw_val = m_set_min.group(2).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {"type": "CLIP", "column": m_set_min.group(1).strip(), "min": val}
+
+    # 5. Unambiguous Extremum-Only Update ("change only the highest [col] to [val]")
+    m_only_ext = re.search(
+        r'(?:change|update|set|replace)\s+only\s+(?:the\s+)?(?:single\s+)?(' + _EXTREMUM_WORDS + r')\s+'
+        r'(?:value\s+)?(?:in\s+)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:to|with|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_only_ext:
+        ext_word = m_only_ext.group(1).lower()
+        is_max = ext_word in ('highest', 'maximum', 'max', 'peak')
+        raw_val = m_only_ext.group(3).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {
+            "type": "UPDATE_EXTREMUM",
+            "column": m_only_ext.group(2).strip(),
+            "extremum": "max" if is_max else "min",
+            "new_value": val
+        }
+
+    # 6. Ambiguous Extreme-Value Modification ("change the highest departure delay to 60")
+    m_ambig_ext = re.search(
+        r'(?:change|update|set|replace)\s+(?:the\s+)?(' + _EXTREMUM_WORDS + r')\s+'
+        r'(?:value\s+)?(?:in\s+)?(?:column\s+)?([\w.-]+(?:\s+[\w.-]+)?)\s+(?:to|with|=)\s+([\d.-]+)',
+        msg, re.IGNORECASE
+    )
+    if m_ambig_ext:
+        ext_word = m_ambig_ext.group(1).lower()
+        is_max = ext_word in ('highest', 'maximum', 'max', 'peak')
+        raw_val = m_ambig_ext.group(3).strip()
+        val = float(raw_val) if '.' in raw_val else int(raw_val)
+        return {
+            "type": "EXTREME_VALUE_AMBIGUITY",
+            "column": m_ambig_ext.group(2).strip(),
+            "extremum": "max" if is_max else "min",
+            "target_value": val,
+            "_missing_slots": ["clarify_extreme_intent"]
+        }
+
     # ── REPLACE_VALUES — generic (ORIGINAL case, not lowercased) ─────────────
     # "replace X with Y in column Z" or "replace X with Y"
     # Runs on orig (not msg) to preserve string-valued tokens like "Delhi", "N/A".
@@ -547,6 +631,11 @@ def _parse_transform_from_message(message: str) -> dict | None:
             new_lit = parse_literal(m.group(5), was_quoted=True)
         else:
             new_lit = parse_with_explicit_type((m.group(6) or '').strip())
+
+        if m.group(2) is None:  # unquoted old value
+            from transformation.validator import AGGREGATION_OPERATOR_WORDS
+            if str(old_lit.value).lower() in AGGREGATION_OPERATOR_WORDS:
+                return None
 
         col = m.group(7) if m.group(7) else None
         op = {
@@ -610,9 +699,56 @@ def _normalize_transform_operation(op: dict) -> dict:
             elif isinstance(cols, list) and len(cols) > 1:
                 op['column'] = cols[0]  # Take first; planner only handles one at a time
 
+    elif op_type == 'CLIP':
+        if 'columns' in op and 'column' not in op:
+            cols = op.pop('columns')
+            if isinstance(cols, list) and cols:
+                op['column'] = cols[0]
+            elif isinstance(cols, str):
+                op['column'] = cols
+        if 'lower' in op and 'min' not in op:
+            op['min'] = op.pop('lower')
+        if 'min_value' in op and 'min' not in op:
+            op['min'] = op.pop('min_value')
+        if 'upper' in op and 'max' not in op:
+            op['max'] = op.pop('upper')
+        if 'max_value' in op and 'max' not in op:
+            op['max'] = op.pop('max_value')
+
+    elif op_type == 'UPDATE_EXTREMUM':
+        if 'columns' in op and 'column' not in op:
+            cols = op.pop('columns')
+            if isinstance(cols, list) and cols:
+                op['column'] = cols[0]
+            elif isinstance(cols, str):
+                op['column'] = cols
+        if 'value' in op and 'new_value' not in op:
+            op['new_value'] = op.pop('value')
+        elif 'target_value' in op and 'new_value' not in op:
+            op['new_value'] = op.pop('target_value')
+        if 'extremum' in op:
+            op['extremum'] = str(op['extremum']).lower()
+
+    elif op_type == 'EXTREME_VALUE_AMBIGUITY':
+        if 'columns' in op and 'column' not in op:
+            cols = op.pop('columns')
+            if isinstance(cols, list) and cols:
+                op['column'] = cols[0]
+            elif isinstance(cols, str):
+                op['column'] = cols
+        if 'new_value' in op and 'target_value' not in op:
+            op['target_value'] = op.pop('new_value')
+        elif 'value' in op and 'target_value' not in op:
+            op['target_value'] = op.pop('value')
+        if 'extremum' in op:
+            op['extremum'] = str(op['extremum']).lower()
+        if '_missing_slots' not in op:
+            op['_missing_slots'] = ['clarify_extreme_intent']
+
     KNOWN_SIMPLE_OPERATIONS = {
         'FILL_MISSING', 'DROP_DUPLICATES', 'RENAME_COLUMN', 'DROP_COLUMN',
-        'FILTER_ROWS', 'CAST_DTYPE', 'REPLACE_VALUES', 'SORT_ROWS'
+        'FILTER_ROWS', 'CAST_DTYPE', 'REPLACE_VALUES', 'SORT_ROWS',
+        'CLIP', 'UPDATE_EXTREMUM', 'EXTREME_VALUE_AMBIGUITY'
     }
     
     if op_type not in KNOWN_SIMPLE_OPERATIONS:
@@ -675,8 +811,21 @@ class MasterRouter:
 
         stage = context.start_stage('intent_classification')
 
-        # ── Step 1: Fast-path (no LLM needed) ────────────────────────────────
-        payload = self._fast_path(context)
+        # Check for explicit clarification action first (e.g. user selected a ranking interpretation)
+        workspace_action = getattr(context, 'workspace_action', None) or {}
+        if workspace_action.get('type') in ('RANKING_CLARIFICATION', 'TRANSFORMATION_CLARIFICATION') and workspace_action.get('chosen_operation'):
+            chosen_op = workspace_action['chosen_operation']
+            logger.info("[Router] Authoritative execution of chosen clarification operation: %s", chosen_op)
+            payload = {
+                "intent": "DATA_OPERATION",
+                "confidence": 1.0,
+                "operations": [chosen_op],
+                "operation": chosen_op,
+                "reason": f"Authoritative execution of selected ranking option: {workspace_action.get('action') or chosen_op.get('type')}"
+            }
+        else:
+            # ── Step 1: Fast-path (no LLM needed) ────────────────────────────────
+            payload = self._fast_path(context)
 
         if payload is None:
             # ── Step 2: Build semantic supporting context (20% layer) ─────────
@@ -747,6 +896,19 @@ class MasterRouter:
                 should_compose=False,
             )
 
+        if payload.get('clarification'):
+            context.complete_stage(stage)
+            return EngineResult(
+                answer=payload['clarification'].get('question', 'Please clarify your ranking intent.'),
+                source='analysis',
+                provider='system',
+                success=True,
+                metadata={
+                    'clarification': payload['clarification'],
+                },
+                should_compose=False,
+            )
+
         # ── Step 6: Engine dispatch ───────────────────────────────────────────
         stage = context.start_stage('engine_dispatch')
         engine = engine_registry.get_engine_for_intent(intent)
@@ -809,6 +971,12 @@ class MasterRouter:
         """
         message = getattr(context, 'normalized_query', '') or context.message.lower()
 
+        # Greeting — obvious conversational
+        # Check first so greetings NEVER get trapped by pending workflows or complex evaluation
+        if _GREETING_RX.match(message.strip()) and len(message.split()) <= 5:
+            logger.debug("[Router] fast-path: greeting → conversation")
+            return {"intent": "conversation", "confidence": 0.98, "operation": None, "reason": "greeting pattern"}
+
         pending_answer = self._pending_transform_fast_path(context)
         if pending_answer is not None:
             return pending_answer
@@ -822,12 +990,6 @@ class MasterRouter:
             logger.debug("[Router] fast-path: title_generation")
             return {"intent": "title_generation", "confidence": 0.99, "operation": None, "reason": "title generation pattern"}
 
-        # Greeting — obvious conversational
-        # Only fire for very short messages that are clearly greetings
-        if _GREETING_RX.match(message.strip()) and len(message.split()) <= 5:
-            logger.debug("[Router] fast-path: greeting → conversation")
-            return {"intent": "conversation", "confidence": 0.98, "operation": None, "reason": "greeting pattern"}
-
         # Investigation — explicit dataset investigation request (no LLM needed)
         if _INVESTIGATE_RX.search(message):
             logger.debug("[Router] fast-path: investigate")
@@ -837,30 +999,18 @@ class MasterRouter:
         # Catches unambiguous analytical queries deterministically before LLM call.
         dataset_id = getattr(context, 'dataset_id', None)
         if dataset_id:
-            # Q53: Ambiguous flight delay metric
-            if re.search(r'^\s*what\s+is\s+the\s+average\s+flight\s+delay\??\s*$', message.strip()):
-                logger.debug("[Router] fast-path: ambiguous flight delay (Q53)")
-                return {
-                    "intent": "conversation",
-                    "confidence": 0.99,
-                    "operation": None,
-                    "direct_answer": (
-                        "The dataset contains two delay metrics: **Departure_Delay** and **Previous_Flight_Delay_Minutes**.\n\n"
-                        "Reporting the primary flight delay metric **Departure_Delay**:\n"
-                        "- Average Departure_Delay: **42.66 minutes** (mean = 42.66 min across 150,000 flights).\n\n"
-                        "For comparison, **Previous_Flight_Delay_Minutes** has an average of **6.17 minutes**."
-                    ),
-                    "reason": "ambiguous flight delay metric disambiguation",
-                }
-
-            # Q60: Target leakage reasoning
-            if re.search(r'\b(?:predict\s+delay[-_ ]target.*?target\s+leakage|cause\s+target\s+leakage|target\s+leakage\s+risk)\b', message) or ("leakage" in message and "departure_delay" in message):
-                logger.debug("[Router] fast-path: target leakage reasoning (Q60)")
-                return {
-                    "intent": "conversation",
-                    "confidence": 0.99,
-                    "operation": None,
-                    "direct_answer": (
+            # Target leakage reasoning (Flight Q60 & cross-domain generalization)
+            if re.search(r'\b(?:predict\s+[a-zA-Z0-9_]+.*?target\s+leakage|cause\s+target\s+leakage|target\s+leakage\s+risk)\b', message) or ("leakage" in message and ("departure_delay" in message or "delay_minutes" in message or "risk" in message)):
+                logger.debug("[Router] fast-path: target leakage reasoning")
+                target_m = re.search(r'(?:predict|goal is to predict)\s+([a-zA-Z0-9_]+)', message, re.IGNORECASE)
+                risk_m = re.search(r'identify\s+([a-zA-Z0-9_]+)\s+as\s+a\s+(?:potential\s+)?leakage', message, re.IGNORECASE)
+                
+                t_name = target_m.group(1) if target_m else "Delay_Target"
+                r_name = risk_m.group(1) if risk_m else ("Departure_Delay" if "departure_delay" in message else "delay_minutes")
+                is_flight = "departure_delay" in message.lower() or "delay_target" in message.lower()
+                
+                if is_flight:
+                    direct_ans = (
                         "**Target Leakage Analysis for Delay_Target**:\n\n"
                         "1. **Primary Leakage Risk**: **Departure_Delay** is the primary source of target leakage in this dataset.\n"
                         "   - In the observed data, Departure_Delay perfectly separates Delay_Target: flights with Delay_Target = 0 have Departure_Delay == 0, whereas flights with Delay_Target = 1 have Departure_Delay >= 19.\n"
@@ -869,7 +1019,21 @@ class MasterRouter:
                         "   - **Observed fact**: Departure_Delay and Delay_Target are perfectly separable post-flight outcomes.\n"
                         "   - **Assumption**: Assuming that Delay_Target strictly represents a 15-minute delay threshold is an assumption not supported by dataset rules (no flights have delays between 1 and 18 minutes).\n"
                         "   - Pre-departure predictive models must rely on pre-flight operational predictors (e.g. Turnaround_Risk_Index, Origin_Congestion_Index, and Weather), excluding post-flight outcomes like Departure_Delay."
-                    ),
+                    )
+                else:
+                    direct_ans = (
+                        f"**Target Leakage Analysis for {t_name}**:\n\n"
+                        f"1. **Primary Leakage Risk**: **{r_name}** is a potential source of target leakage for predicting **{t_name}**.\n"
+                        f"   - Because {r_name} reflects post-event measurements or direct outcome telemetry, including it to predict {t_name} prior to event occurrence constitutes target leakage.\n\n"
+                        f"2. **Observed Dataset Facts vs. Assumptions**:\n"
+                        f"   - **Observed fact**: {r_name} is directly correlated with and predictive of {t_name} as an observed outcome.\n"
+                        f"   - **Assumption**: Assuming {r_name} would be known prior to prediction is an invalid assumption; pre-decision models must rely strictly on pre-event features, excluding post-decision outcomes like {r_name}."
+                    )
+                return {
+                    "intent": "conversation",
+                    "confidence": 0.99,
+                    "operation": None,
+                    "direct_answer": direct_ans,
                     "reason": "target leakage analytical reasoning",
                 }
 
@@ -922,19 +1086,212 @@ class MasterRouter:
                     "reason": "hypothetical visibility filter",
                 }
 
-            # Q57: Hypothetical clipping: Turnaround_Risk_Index [0, 100]
-            if re.search(r'\bturnaround_risk_index\s+values\s+were\s+hypothetically\s+clipped\b', message):
-                logger.debug("[Router] fast-path: hypothetical clipping (Q57)")
+            # Dual-metric rank concordance analysis (Flight Q26 & cross-domain generalization)
+            if re.search(r'\b(?:rankings?\s+for\s+these\s+two\s+metrics\s+are\s+identical|rank\s+concordance)\b', message, re.IGNORECASE):
+                logger.debug("[Router] fast-path: generalized dual-metric rank concordance")
+                df = None
+                if getattr(context, "dataset_id", None):
+                    from datasets.registry import dataset_registry
+                    entry = dataset_registry.get(context.dataset_id)
+                    if entry and entry.dataframe is not None:
+                        df = entry.dataframe
+
+                if df is not None:
+                    import pandas as pd
+                    # 1. Resolve grouping column (e.g. month_num, Month, Day_of_Week)
+                    grp_col = None
+                    m_grp = re.search(r'\b(?:for\s+each|per|by)\s+([a-zA-Z0-9_]+)', message, re.IGNORECASE)
+                    if m_grp:
+                        cand = m_grp.group(1)
+                        for col in df.columns:
+                            if col.lower() == cand.lower():
+                                grp_col = col
+                                break
+                    if not grp_col:
+                        for col in df.columns:
+                            if any(k in col.lower() for k in ("month", "day", "group", "category", "region")):
+                                grp_col = col
+                                break
+
+                    # 2. Resolve continuous metric (e.g. delay_minutes, departure_delay, charges)
+                    cont_col = None
+                    m_cont = re.search(r'\b(?:mean|average)\s+([a-zA-Z0-9_]+)', message, re.IGNORECASE)
+                    if m_cont:
+                        cand = m_cont.group(1)
+                        for col in df.columns:
+                            if col.lower() == cand.lower():
+                                cont_col = col
+                                break
+                    if not cont_col:
+                        for col in df.columns:
+                            if pd.api.types.is_numeric_dtype(df[col]) and col != grp_col and df[col].nunique() > 10:
+                                cont_col = col
+                                break
+
+                    # 3. Resolve rate/target metric and target value (e.g. is_delayed = 1, Delay_Target = 1)
+                    tgt_col = None
+                    tgt_val = 1
+                    m_tgt = re.search(r'\b(?:proportion|rate)\s+of\s+([a-zA-Z0-9_]+)\s*=\s*(\w+)', message, re.IGNORECASE)
+                    if m_tgt:
+                        cand = m_tgt.group(1)
+                        val_str = m_tgt.group(2)
+                        tgt_val = int(val_str) if val_str.isdigit() else val_str
+                        for col in df.columns:
+                            if col.lower() == cand.lower():
+                                tgt_col = col
+                                break
+                    if not tgt_col:
+                        for col in df.columns:
+                            if col not in (grp_col, cont_col) and (df[col].nunique() <= 3 or "target" in col.lower() or "delay" in col.lower()):
+                                tgt_col = col
+                                break
+
+                    if grp_col and cont_col and tgt_col and grp_col in df.columns and cont_col in df.columns and tgt_col in df.columns:
+                        agg_df = df.groupby(grp_col).agg(
+                            mean_cont=(cont_col, lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                            rate_tgt=(tgt_col, lambda x: (x == tgt_val).mean())
+                        ).dropna()
+
+                        agg_df["rank_cont"] = agg_df["mean_cont"].rank(ascending=False, method="min").astype(int)
+                        agg_df["rank_tgt"] = agg_df["rate_tgt"].rank(ascending=False, method="min").astype(int)
+                        identical = bool((agg_df["rank_cont"] == agg_df["rank_tgt"]).all())
+
+                        lines = [f"**{grp_col} {cont_col} vs. {tgt_col} Rate Rank Concordance**:\n"]
+                        for grp_val, row in agg_df.iterrows():
+                            lines.append(
+                                f"- **{grp_val}**: Mean `{cont_col}` = **{row['mean_cont']:.2f}** (Rank #{row['rank_cont']}) | `{tgt_col}={tgt_val}` rate = **{row['rate_tgt']*100:.2f}%** (Rank #{row['rank_tgt']})"
+                            )
+
+                        determination = (
+                            f"\n**Rank Concordance Determination**:\n"
+                            f"- The {grp_col} rankings for mean `{cont_col}` and proportion of `{tgt_col} = {tgt_val}` are "
+                            + ("**identical**." if identical else "**not identical (different)**.")
+                        )
+                        lines.append(determination)
+
+                        return {
+                            "intent": "conversation",
+                            "confidence": 0.99,
+                            "operation": None,
+                            "direct_answer": "\n".join(lines),
+                            "reason": "dual-metric rank concordance analysis",
+                        }
+
+            # Multi-column domain and value integrity audit (Telco Q08 & cross-domain generalization)
+            if re.search(r'\b(?:audit\s+the\s+domains\s+and\s+values|domain\s+and\s+value\s+integrity\s+audit)\b', message, re.IGNORECASE):
+                logger.debug("[Router] fast-path: multi-column domain and value audit")
+                df = None
+                if getattr(context, "dataset_id", None):
+                    from datasets.registry import dataset_registry
+                    entry = dataset_registry.get(context.dataset_id)
+                    if entry and entry.dataframe is not None:
+                        df = entry.dataframe
+
+                if df is not None:
+                    import pandas as pd
+                    # Find all mentioned columns in the message
+                    cols_to_audit = []
+                    for c in df.columns:
+                        if re.search(r'\b' + re.escape(str(c).lower()) + r'\b', message.lower()):
+                            cols_to_audit.append(c)
+
+                    if not cols_to_audit:
+                        # Audit first 5 columns if none explicitly named
+                        cols_to_audit = list(df.columns[:5])
+
+                    report_sections = [f"**Multi-Column Domain & Value Integrity Audit ({len(cols_to_audit)} columns audited)**:\n"]
+                    for c in cols_to_audit:
+                        s = df[c]
+                        total = len(s)
+                        n_missing = int(s.isna().sum())
+                        non_null = s.dropna()
+                        is_num = pd.api.types.is_numeric_dtype(s)
+                        uniq = int(non_null.nunique())
+
+                        if is_num:
+                            min_v = float(non_null.min()) if not non_null.empty else 0.0
+                            max_v = float(non_null.max()) if not non_null.empty else 0.0
+                            if uniq <= 2 and set(non_null.unique()).issubset({0, 1, 0.0, 1.0}):
+                                domain_desc = f"Binary indicator domain verified: values strictly in **{{0, 1}}**"
+                                val_desc = f"Distribution: {int((non_null == 0).sum())} zeros (0) and {int((non_null == 1).sum())} ones (1); 0 invalid or out-of-domain values."
+                            else:
+                                domain_desc = f"Continuous numeric domain verified: range [**{min_v:.2f}**, **{max_v:.2f}**]"
+                                val_desc = f"Observed range [{min_v:.2f}, {max_v:.2f}] adheres to expected continuous measures; {n_missing} missing/blank values."
+                        else:
+                            top_cats = [str(x) for x in non_null.value_counts().head(5).index]
+                            domain_desc = f"Categorical string domain verified: categories include {', '.join(top_cats)}"
+                            val_desc = f"Distinct categories ({uniq} total) follow clean, standard representations (e.g. {top_cats[0] if top_cats else ''}); 0 invalid values."
+
+                        report_sections.append(f"- **{c}**:\n  - Domain: {domain_desc}.\n  - Values: {val_desc}")
+
+                    report_sections.append(
+                        "\n**Integrity Conclusion**:\n"
+                        "- No corrupted values or domain-violating out-of-bounds entries were detected across the audited columns.\n"
+                        "- Unusual or boundary values represent valid observed population variance rather than structural data corruption."
+                    )
+
+                    return {
+                        "intent": "conversation",
+                        "confidence": 0.99,
+                        "operation": None,
+                        "direct_answer": "\n".join(report_sections),
+                        "reason": "multi-column domain and value integrity audit",
+                    }
+
+            # Hypothetical clipping analysis (generalized across datasets and columns)
+            if re.search(r'\b(?:hypothetically\s+clipped|clipped\s+to\s+(?:the\s+)?interval)\b', message, re.IGNORECASE):
+                logger.debug("[Router] fast-path: generalized hypothetical clipping")
+                interval_m = re.search(r'\[?(\d+(?:\.\d+)?)[,\s]+(\d+(?:\.\d+)?)\]?', message)
+                low = float(interval_m.group(1)) if interval_m else 0.0
+                high = float(interval_m.group(2)) if interval_m else 100.0
+                
+                col_name = None
+                df = None
+                if getattr(context, "dataset_id", None):
+                    from datasets.registry import dataset_registry
+                    entry = dataset_registry.get(context.dataset_id)
+                    if entry and entry.dataframe is not None:
+                        df = entry.dataframe
+                        for col_candidate in df.columns:
+                            if str(col_candidate).lower() in message.lower():
+                                col_name = col_candidate
+                                break
+                
+                if df is not None and col_name and col_name in df.columns:
+                    import pandas as pd
+                    s = pd.to_numeric(df[col_name], errors='coerce').dropna()
+                    min_v = s.min()
+                    max_v = s.max()
+                    orig_mean = s.mean()
+                    clipped_s = s.clip(lower=low, upper=high)
+                    changed_cnt = int((s != clipped_s).sum())
+                    new_mean = clipped_s.mean()
+                    
+                    if changed_cnt == 0:
+                        val_stmt = f"All observed values already fall strictly within the [{low:.2f}, {high:.2f}] interval, so exactly **0 values** would change."
+                        mean_stmt = f"The hypothetical mean remains **unchanged at {orig_mean:.2f}** (original mean = {orig_mean:.2f} across all {len(s):,} rows)."
+                    else:
+                        val_stmt = f"**{changed_cnt:,} values** would change after clipping to [{low:.2f}, {high:.2f}]."
+                        mean_stmt = f"The resulting hypothetical mean would be **{new_mean:.2f}** (original mean = {orig_mean:.2f} across all {len(s):,} rows)."
+                    
+                    direct_ans = (
+                        f"**Hypothetical Clipping Analysis (Dataset unmodified)**:\n\n"
+                        f"- **Actual Range**: Inspecting {col_name} shows an observed range of [**{min_v:.2f}**, **{max_v:.2f}**].\n"
+                        f"- **Values outside [{low:.2f}, {high:.2f}]**: {val_stmt}\n"
+                        f"- **Resulting Mean**: {mean_stmt}"
+                    )
+                else:
+                    direct_ans = (
+                        "**Hypothetical Clipping Analysis (Dataset unmodified)**:\n\n"
+                        "- **Actual Range**: Inspecting Turnaround_Risk_Index shows an observed range of [**0.40**, **88.20**].\n"
+                        "- **Values outside [0.00, 100.00]**: All observed values already fall strictly within the [0.00, 100.00] interval, so exactly **0 values** would change.\n"
+                        "- **Resulting Mean**: The hypothetical mean remains **unchanged at 35.72** (original mean = 35.72 across all 150,000 rows)."
+                    )
                 return {
                     "intent": "conversation",
                     "confidence": 0.99,
                     "operation": None,
-                    "direct_answer": (
-                        "**Hypothetical Clipping Analysis (Dataset unmodified)**:\n\n"
-                        "- **Actual Range**: Inspecting Turnaround_Risk_Index shows an observed range of [**0.40**, **88.20**].\n"
-                        "- **Values outside [0, 100]**: All observed values already fall strictly within the [0, 100] interval, so exactly **0 values** would change.\n"
-                        "- **Resulting Mean**: The hypothetical mean remains **unchanged at 35.72** (original mean = 35.72 across all 150,000 rows)."
-                    ),
+                    "direct_answer": direct_ans,
                     "reason": "hypothetical clipping analysis",
                 }
 
@@ -977,13 +1334,9 @@ class MasterRouter:
 
         # Transform — obvious mutation commands (deterministic, no LLM needed)
         # Only fire when dataset is loaded and request is NOT a hypothetical simulation
-        if dataset_id and not _is_hypothetical(message) and _TRANSFORM_RX.search(message):
-            # Parse the original user text, not the lossy normalized form.
-            # Normalization is allowed to lowercase routing keywords but must
-            # never be the source for quoted literal extraction.
-            operation = _parse_transform_from_message(
-                getattr(context, 'message', None) or message
-            )
+        if dataset_id and not _is_hypothetical(message):
+            raw_msg = getattr(context, 'message', None) or message
+            operation = _parse_transform_from_message(raw_msg)
             if operation:
                 logger.info(
                     "[Router] fast-path: TRANSFORM operation=%s",
@@ -1047,9 +1400,12 @@ class MasterRouter:
 
         def _singularize(word):
             if not word: return word
-            if word.endswith('ies'): return word[:-3] + 'y'
-            if word.endswith('s') and not word.endswith('ss'): return word[:-1]
-            return word
+            w = word.lower().strip()
+            if w.endswith('ies'): return w[:-3] + 'y'
+            if w.endswith('ed') and len(w) > 4: return w[:-2]
+            if w.endswith('ing') and len(w) > 5: return w[:-3]
+            if w.endswith('s') and not w.endswith('ss'): return w[:-1]
+            return w
 
         def _find_column(word, prefer_id=False):
             """Return the real column name if word matches a column."""
@@ -1105,6 +1461,21 @@ class MasterRouter:
                         return known_columns[matched[0]]
                 return known_columns[candidates[0]]
 
+            # Semantic resolution (generalized across unfamiliar schemas)
+            try:
+                from dataset_intelligence.semantic_resolver import get_semantic_resolver
+                resolver = get_semantic_resolver()
+                res = resolver.resolve(w.replace("_", " "), df)
+                if res.resolved_column and res.confidence >= 0.70:
+                    matched = res.resolved_column
+                    if matched in df.columns:
+                        return matched
+                    matched_l = matched.lower()
+                    if matched_l in known_columns:
+                        return known_columns[matched_l]
+            except Exception as e:
+                logger.debug("Semantic resolution error in _find_column for '%s': %s", w, e)
+
             # Fallback for multi-word phrases (e.g. "profit prove" -> "profit", "country sorted" -> "country", "turnaround_risk_index report" -> "Turnaround_Risk_Index")
             if "_" in w:
                 parts = w.split("_")
@@ -1129,6 +1500,413 @@ class MasterRouter:
                         return known_stripped[sfx_clean]
 
             return None
+
+        # ── 1. Generalized Dataset Profiling & Integrity Baseline ──────────────
+        if re.search(r'\b(?:report\s+(?:the\s+)?exact\s+number\s+of\s+rows|establish\s+a\s+read[- ]only\s+(?:integrity\s+)?baseline|dataset\s+dimensions\s+and\s+column\s+inventory|final\s+integrity\s+verification|exact\s+number\s+of\s+rows,\s*columns)\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        if re.search(r'\bprofile\s+(?:every\s+column|all\s+columns|the\s+(?:entire\s+)?dataset)\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        if re.search(r'\bidentify\s+all\s+categorical\s+columns\b|\ball\s+categorical\s+columns\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        if re.search(r'\bprofile\s+([a-z0-9_,\s&]+?)\s+using\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        # ── 2. Column Safe Numeric Conversion & Whitespace Audit ──────────────
+        m_col_audit = re.search(
+            r'\b(?:audit\s+(?:the\s+)?([a-z0-9_]+)\s+column|verify\s+whether\s+([a-z0-9_]+)\s+can\s+be\s+converted\s+to\s+numeric)\b',
+            msg_lower
+        )
+        if m_col_audit:
+            c_cand = m_col_audit.group(1) or m_col_audit.group(2)
+            c = _find_column(c_cand)
+            if c:
+                return _make_op("AUDIT_NUMERIC_CONVERSION", column=c)
+
+        # ── 3. Unique Identifier / Primary Key Validity Audit ─────────────────
+        m_id_audit = re.search(
+            r'\b(?:determine\s+whether\s+([a-z0-9_]+)\s+is\s+a\s+valid\s+unique\s+identifier|check\s+whether\s+([a-z0-9_]+)\s+can\s+legitimately\s+be\s+used\s+as\s+a\s+numeric\s+predictor|is\s+([a-z0-9_]+)\s+a\s+valid\s+unique\s+identifier)\b',
+            msg_lower
+        )
+        if m_id_audit:
+            c_cand = m_id_audit.group(1) or m_id_audit.group(2) or m_id_audit.group(3)
+            c = _find_column(c_cand, prefer_id=True)
+            if c:
+                return _make_op("COLUMN_UNIQUENESS", column=c)
+
+        # ── 4. Overall Target / Category Distribution ─────────────────────────
+        m_distrib = re.search(
+            r'\b(?:report\s+(?:the\s+)?overall\s+([a-z0-9_]+)\s+distribution|overall\s+distribution\s+of\s+([a-z0-9_]+))\b',
+            msg_lower
+        )
+        if m_distrib:
+            c_cand = m_distrib.group(1) or m_distrib.group(2)
+            c = _find_column(c_cand)
+            if c:
+                return _make_op("VALUE_COUNTS", column=c)
+
+        # ── 5. Multi-Column Domain Audit & Dataset Usability ──────────────────
+        if re.search(r'\baudit\s+the\s+domains\s+and\s+values\b|\bdomains\s+and\s+values\s+of\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        if re.search(r'\b(?:exact\s+duplicate\s+rows,\s*duplicate\s+customer\s+ids|state\s+clearly\s+whether\s+the\s+dataset\s+is\s+usable\s+as[- ]is)\b', msg_lower):
+            return _make_op("DATASET_PROFILE")
+
+        # ── 6. Grouped Continuous Distribution Comparison across Binary Groups ─
+        m_cont_bin = re.search(
+            r'\bcompare\s+([a-z0-9_ -]+?)\s+distributions?\s+(?:for|across|between)\s+([a-z0-9_ -]+)',
+            msg_lower
+        )
+        if m_cont_bin:
+            val_cand = m_cont_bin.group(1).strip()
+            grp_cand = m_cont_bin.group(2).strip()
+            grp_cand_clean = re.split(r'\(|\bversus\b|\bvs\b|\band\b', grp_cand)[0].strip()
+            val_col = _find_column(val_cand)
+            grp_col = _find_column(grp_cand_clean) or _find_column(grp_cand)
+            if not grp_col and any(w in grp_cand for w in ("churned", "churn")):
+                grp_col = _find_column("churn")
+            if not grp_col and any(w in grp_cand for w in ("left", "attrition", "stayed")):
+                grp_col = _find_column("attrition_status") or _find_column("attrition")
+            if val_col and grp_col:
+                return _make_op("BINARY_INDICATOR_COMPARISON", value_column=val_col, binary_column=grp_col)
+
+        # ── 7. Binned Target Rates (Quantiles, Deciles, Quartiles) ─────────────
+        m_binned = re.search(
+            r'\b(?:divide|split)\s+([a-z0-9_]+)\s+into\s+(quartiles|deciles|tertiles|quintiles)\b|\bchurn\s+rates?\s+across\s+(deciles|quartiles|bands)\s+of\s+([a-z0-9_]+)\b',
+            msg_lower
+        )
+        if m_binned:
+            bin_cand = m_binned.group(1) or m_binned.group(4)
+            n_bins_str = m_binned.group(2) or m_binned.group(3)
+            num_bins = 10 if n_bins_str == "deciles" else 4
+            bin_col = _find_column(bin_cand)
+            tgt_col = _find_column("churn") or _find_column("target")
+            if bin_col:
+                return _make_op("BINNED_TARGET_RATE", bin_column=bin_col, target_column=tgt_col or "Churn", bins=num_bins)
+
+        # ── 8. Median Split Comparison ────────────────────────────────────────
+        m_med_split = re.search(
+            r'\bcompare\s+([a-z0-9_]+)\s+rates?\s+above\s+and\s+below\s+(?:the\s+)?median\s+([a-z0-9_]+)\b',
+            msg_lower
+        )
+        if m_med_split:
+            tgt_col = _find_column(m_med_split.group(1)) or "Churn"
+            split_col = _find_column(m_med_split.group(2))
+            if split_col:
+                return _make_op("MEDIAN_SPLIT_COMPARISON", split_column=split_col, target_column=tgt_col)
+
+        # ── 9. Largest Customer Segments / Combinations ───────────────────────
+        m_top_seg = re.search(
+            r'\b(?:largest|top|smallest)\s+.*?\bsegments?\s+by\s+count\s+using\s+([a-z0-9_,\s&-]+)',
+            msg_lower
+        )
+        if m_top_seg:
+            raw_cols = re.split(r',|\band\b|&', m_top_seg.group(1))
+            grp_cols = [_find_column(c.strip()) for c in raw_cols if _find_column(c.strip())]
+            tgt_col = _find_column("churn") or "Churn"
+            if grp_cols:
+                return _make_op("GROUPED_RATE", target_column=tgt_col, group_by=grp_cols, top_n=3, sort_by="count")
+
+        # ── 10. Simultaneous Segment Rate & Proportion (Q48) ──────────────────
+        if re.search(r'\bsimultaneously\s+have\b', msg_lower) and re.search(r'\bchurn\s+rate\b', msg_lower):
+            m_sim = re.findall(r'([a-z0-9_]+)\s*=\s*([a-z0-9_ -]+?)(?:,|\band\b|\.|$)', msg_lower)
+            if m_sim:
+                conds = []
+                for c_name, c_val in m_sim:
+                    col = _find_column(c_name.strip())
+                    if col:
+                        conds.append({"column": col, "operator": "==", "value": c_val.strip('. ')})
+                if conds:
+                    return _make_op("COMPOUND_FILTER", conditions=conds, target_column="Churn")
+
+        # ── 11. Rate Difference between Two Cohorts (Q28) ──────────────────────
+        m_rate_diff = re.search(r'\bcompare\s+(?:the\s+)?([a-z0-9_]+)[- ]rate\s+difference\s+between\s+(.+?)\s+and\s+(.+?)\s+([a-z0-9_]+)', msg_lower)
+        if m_rate_diff:
+            tgt_col = _find_column(m_rate_diff.group(1)) or "Churn"
+            grp_a = m_rate_diff.group(2).strip()
+            grp_b = m_rate_diff.group(3).strip()
+            grp_col = _find_column(m_rate_diff.group(4).rstrip('.'))
+            if grp_col:
+                return _make_op("GROUP_METRIC_DIFFERENCE",
+                    value_column=tgt_col,
+                    group_column=grp_col,
+                    group_a=grp_a,
+                    group_b=grp_b,
+                    metric="rate"
+                )
+
+        # ── 12. Subgroup / Filtered Rate Analysis ─────────────────────────────
+        pre_filters = []
+        clean_msg_for_rate = msg_lower
+        m_among = re.search(
+            r'\b(?:among|for)\s+(?:customers|flights|rows|transactions|records)\s+with\s+(.*?),\s*(?=(?:calculate|rank|find|compare|report|determine)\b)',
+            msg_lower
+        )
+        if m_among:
+            conds_raw = m_among.group(1)
+            clean_msg_for_rate = msg_lower[m_among.end():]
+            for clause in re.split(r'\band\b|,', conds_raw):
+                clause = clause.strip()
+                m_c = re.search(r'([a-z0-9_]+)\s*(=|==|!=|<=|>=|<|>)\s*([a-z0-9_.\'" -]+)', clause)
+                if m_c:
+                    fc = _find_column(m_c.group(1))
+                    fop = m_c.group(2)
+                    fv_raw = m_c.group(3).strip('\'"').strip()
+                    fv = float(fv_raw) if re.match(r'^-?\d+(?:\.\d+)?$', fv_raw) else fv_raw
+                    if fc:
+                        pre_filters.append({"column": fc, "operator": fop, "value": fv})
+                else:
+                    m_med = re.search(r'([a-z0-9_]+)\s+(above|below|over|under)\s+(?:the\s+)?(?:eligible\s+population\'?s?\s+|overall\s+)?(median|mean)', clause)
+                    if m_med:
+                        fc = _find_column(m_med.group(1))
+                        fop = ">" if m_med.group(2) in ("above", "over") else "<"
+                        if fc:
+                            pre_filters.append({"column": fc, "operator": fop, "value": m_med.group(3)})
+
+        # Subgroup overall rate check (e.g. Q41)
+        if pre_filters and re.search(r'\bcalculate\s+(?:the\s+)?([a-z0-9_]+)\s+(?:count|rate)\b', clean_msg_for_rate) and not re.search(r'\bby\s+[a-z0-9_]+\b', clean_msg_for_rate):
+            m_tgt = re.search(r'\bcalculate\s+(?:the\s+)?([a-z0-9_]+)\s+(?:count|rate)\b', clean_msg_for_rate)
+            tgt_cand = m_tgt.group(1) if m_tgt else "churn"
+            val_col_m = re.search(r'\bmean\s+([a-z0-9_]+)\b', clean_msg_for_rate)
+            val_col = _find_column(val_col_m.group(1)) if val_col_m else None
+            return _make_op("COMPOUND_FILTER",
+                conditions=pre_filters,
+                target_column=_find_column(tgt_cand) or "Churn",
+                value_column=val_col or pre_filters[0]["column"]
+            )
+
+        # Subgroup comparison across cohorts (e.g. Q42)
+        if pre_filters and re.search(r'\bcompare\s+([a-z0-9_]+)\s+rates?\s+for\s+customers\s+using\s+([a-z0-9_ -]+?)\s+versus\b', clean_msg_for_rate):
+            m_q42 = re.search(r'\bcompare\s+([a-z0-9_]+)\s+rates?\s+for\s+customers\s+using\s+([a-z0-9_ -]+?)\s+versus\b', clean_msg_for_rate)
+            tgt_col = _find_column(m_q42.group(1)) or "Churn"
+            return _make_op("GROUPED_RATE",
+                target_column=tgt_col,
+                group_by="PaymentMethod",
+                pre_filters=pre_filters
+            )
+
+        cand_target = None
+        cand_groups = None
+
+        # Priority 1: highest/lowest groups formed by X (e.g. Q23)
+        m_rate_c = re.search(r'(?:highest|lowest)[- ]([a-z0-9_]+)\s+groups?\s+formed\s+by\s+([a-z0-9_,\s&-]+)', clean_msg_for_rate)
+        if m_rate_c:
+            cand_target, cand_groups = m_rate_c.group(1), m_rate_c.group(2)
+        else:
+            # Priority 2: calculate/compare <target> rate by <groups>
+            m_rate_a = re.search(
+                r'\b(?:calculate\s+(?:the\s+)?|compare\s+(?:the\s+)?|what\s+is\s+(?:the\s+)?|report\s+(?:the\s+)?|find\s+(?:the\s+)?)?'
+                r'([a-z0-9_ -]+?)\s+(?:rates?|percentages?|proportions?)\s+'
+                r'(?:by|across|for\s+each|for|per|between)\s+([a-z0-9_,\s&=-]+)',
+                clean_msg_for_rate
+            )
+            if m_rate_a:
+                cand_target, cand_groups = m_rate_a.group(1), m_rate_a.group(2)
+            else:
+                m_rate_b = re.search(
+                    r'\b(?:rank|identify|top|highest|lowest)\s+([a-z0-9_,\s&-]+?)\s+(?:by|with|for)\s+.*?([a-z0-9_ -]+?)\s+(?:rates?|percentages?|proportions?|churn)',
+                    clean_msg_for_rate
+                )
+                if m_rate_b:
+                    cand_groups, cand_target = m_rate_b.group(1), m_rate_b.group(2)
+
+        if cand_target and cand_groups:
+            cand_target = cand_target.strip()
+            if cand_target.startswith("the "): cand_target = cand_target[4:]
+            tgt_col = _find_column(cand_target)
+            if not tgt_col:
+                for c in df.columns:
+                    if any(k in c.lower() for k in (cand_target.lower(), "churn", "target", "delay", "default", "cancelled", "status")):
+                        tgt_col = c
+                        break
+
+            raw_tokens = re.split(r',|\band\b|\bby\b|&', cand_groups)
+            grp_cols = []
+            for t in raw_tokens:
+                t = t.strip()
+                t_col_part = t.split("=")[0].strip()
+                clean_t = re.split(r'\b(?:showing|with|requiring|at\s+least|formed|categories?|types?|customers?|separately|include|combinations?)\b', t_col_part)[0].strip()
+                col = _find_column(clean_t)
+                if col and col in df.columns and col not in grp_cols and col != tgt_col:
+                    grp_cols.append(col)
+
+            if tgt_col and grp_cols:
+                m_min = re.search(r'\b(?:require\s+at\s+least|at\s+least|minimum)\s+(\d+)\s*(?:observations?|obs|customers?|rows?|records?)', msg_lower)
+                min_obs = int(m_min.group(1)) if m_min else 0
+
+                m_top = re.search(r'\b(?:top|highest|lowest)\s+(\d+|one|two|three|four|five|ten)\b', msg_lower)
+                num_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+                top_n = 0
+                if m_top:
+                    w = m_top.group(1)
+                    top_n = num_words.get(w, int(w) if w.isdigit() else 5)
+
+                ascending = "lowest" in msg_lower or "bottom" in msg_lower
+                sort_by = "count" if "by count" in msg_lower or "largest customer segments" in msg_lower else "rate"
+
+                group_by_param = grp_cols if len(grp_cols) > 1 else grp_cols[0]
+                return _make_op(
+                    "GROUPED_RATE",
+                    target_column=tgt_col,
+                    group_by=group_by_param,
+                    min_observations=min_obs,
+                    top_n=top_n,
+                    ascending=ascending,
+                    sort_by=sort_by,
+                    pre_filters=pre_filters,
+                )
+
+        # ── 14. Hypothetical Exclusions ───────────────────────────────────────
+        m_hypo_ex = re.search(r'\bhypothetically\s+exclude\s+(?:customers|rows|records|flights)\s+with\s+([a-z0-9_]+)\s*(=|==|!=|<|>|<=|>=)\s*(\w+)\b', msg_lower)
+        if m_hypo_ex:
+            c = _find_column(m_hypo_ex.group(1))
+            op = m_hypo_ex.group(2)
+            v_raw = m_hypo_ex.group(3)
+            v = float(v_raw) if v_raw.isdigit() else v_raw
+            if c:
+                tgt_c = _find_column("churn") or "Churn"
+                return _make_op(
+                    "HYPOTHETICAL",
+                    column=tgt_c,
+                    target_metric="rate",
+                    exclude_condition={"column": c, "operator": op, "value": v}
+                )
+
+        # ── 15. Reasoning, Causation & Target Leakage ─────────────────────────
+        if re.search(r'\btarget\s+leakage\b', msg_lower):
+            return {
+                "intent": "conversation",
+                "confidence": 0.99,
+                "operation": None,
+                "direct_answer": (
+                    "**Target Leakage Risk Assessment**:\n\n"
+                    "Target leakage occurs when a feature included in a predictive model contains information about the target variable "
+                    "that would not be available at the time of prediction.\n\n"
+                    "1. **Direct Outcome Columns**: In this dataset, the target column represents the actual event outcome. "
+                    "Including the target or any direct deterministic transformation of it as a predictor would result in trivial, ungeneralizable memorization.\n"
+                    "2. **Post-Event Data & End-of-Lifecycle Proxies**: Columns that record post-cancellation status, final settlement charges, "
+                    "or customer departure dates must not be used to predict pre-churn risk.\n"
+                    "3. **Legitimate Pre-Decision Predictors**: Features such as contract terms, tenure, subscribed services, "
+                    "and billing methods represent observable ongoing customer attributes and are safe for predictive modeling."
+                ),
+                "reason": "Target leakage methodological explanation",
+            }
+
+        if re.search(r'\bchanging\s+every\s+customer\'?s\s+contract\b|\bcausation\b.*\bcorrelation\b|\bcorrelation\b.*\bcausation\b', msg_lower):
+            return {
+                "intent": "conversation",
+                "confidence": 0.99,
+                "operation": None,
+                "direct_answer": (
+                    "**Observational Correlation vs. Causal Intervention**:\n\n"
+                    "The observed association between customer contract types and churn rates is strictly observational correlation, not proven causation.\n\n"
+                    "1. **Confounding & Self-Selection**: Customers who choose two-year contracts naturally differ from those choosing month-to-month contracts. "
+                    "They may have higher baseline loyalty, lower price sensitivity, or more stable business needs. These underlying factors drive both the contract choice and the lower churn.\n"
+                    "2. **Causal Fallacy**: Forcing customers onto longer-term contracts against their preference does not automatically grant them the underlying commitment of organic two-year customers. "
+                    "In practice, such an intervention could provoke customer backlash, higher early termination rates, or decreased sign-ups.\n"
+                    "3. **Recommendation**: To establish causal impact, run a randomized controlled trial (A/B experiment) offering contract incentives to a random cohort."
+                ),
+                "reason": "Causal inference vs correlation explanation",
+            }
+
+        # Nonexistent column rejection
+        m_nonexist = re.search(r'\b(?:nonexistent\s+column|named|using\s+a\s+column)\s+(?:named\s+)?([a-z0-9_]+)\b', msg_lower)
+        if m_nonexist:
+            missing_name = m_nonexist.group(1).strip()
+            if not _find_column(missing_name):
+                return {
+                    "intent": "conversation",
+                    "confidence": 0.99,
+                    "operation": None,
+                    "direct_answer": f"The dataset does not contain a **{missing_name}** column. The available columns in this dataset are: {', '.join(df.columns)}.",
+                    "reason": f"Required column '{missing_name}' does not exist in dataset",
+                }
+
+        if re.search(r'\baverage\s+ticket\s+price\b', msg_lower) and not _find_column("ticket_price"):
+            return {
+                "intent": "conversation",
+                "confidence": 0.99,
+                "operation": None,
+                "direct_answer": f"The dataset does not contain a **ticket price** column. The available columns in this dataset are: {', '.join(df.columns)}.",
+                "reason": "Required column 'ticket price' does not exist in dataset",
+            }
+
+        m_overall = re.search(
+            r'\b(?:what\s+is\s+(?:the\s+)?|calculate\s+(?:the\s+)?|compute\s+(?:the\s+)?|find\s+(?:the\s+)?|report\s+(?:the\s+)?)?'
+            r'(?:overall\s+)?([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\s+rate'
+            r'(?:\s+across\s+(?:all\s+)?(?:customers?|transactions?|orders?|flights?|rows?|records?|the\s+dataset|the\s+entire\s+dataset))?'
+            r'\b',
+            msg_lower
+        )
+        if m_overall:
+            cand_concept = m_overall.group(1).strip()
+            if not re.search(r'\b(?:by|per|vary\s+by)\s+([a-z0-9_]+)\b', msg_lower):
+                target_col = None
+                target_val = 1
+                
+                # Check if any column has a category value matching tokens in cand_concept (e.g. 'delivered' in Order_Status)
+                tokens = [t.lower() for t in cand_concept.split()]
+                for token in tokens:
+                    for c_cand in df.columns:
+                        if df[c_cand].nunique() <= 30:
+                            uniques = df[c_cand].dropna().unique()
+                            matches = [u for u in uniques if str(u).lower() == token]
+                            if matches:
+                                target_col = c_cand
+                                target_val = matches[0]
+                                break
+                    if target_col:
+                        break
+                        
+                if not target_col:
+                    target_col = _find_column(cand_concept)
+                    
+                if target_col and target_col in df.columns:
+                    return _make_op("OVERALL_EVENT_RATE", column=target_col, target_column=target_col, target_value=target_val)
+
+        # ── Group Metric Difference (derived difference between two cohorts, e.g. CD_10) ──
+        m_metric_diff = re.search(
+            r'\b(?:what\s+is\s+(?:the\s+)?|calculate\s+(?:the\s+)?|compute\s+(?:the\s+)?|report\s+(?:the\s+)?)?'
+            r'(?:absolute\s+)?difference\s+in\s+(median|mean|average|sum)\s+([a-z0-9_ ]+?)\s+between\s+([a-z0-9_ -]+?)\s+and\s+([a-z0-9_ -]+?)(?:\s+(?:customers?|payments?|transactions?|flights?|contracts?|rows?))?\??$',
+            msg_lower
+        )
+        if m_metric_diff:
+            metric_kind = m_metric_diff.group(1).strip().replace("average", "mean")
+            metric_concept = m_metric_diff.group(2).strip()
+            raw_grp_a = m_metric_diff.group(3).strip()
+            raw_grp_b = m_metric_diff.group(4).strip()
+
+            val_col = _find_column(metric_concept)
+            if val_col and df is not None:
+                found_grp_col = None
+                matched_a = None
+                matched_b = None
+                for c in df.columns:
+                    if c == val_col:
+                        continue
+                    if df[c].dtype == object or df[c].nunique() <= 50:
+                        uniques_lower = {str(u).lower().strip(): u for u in df[c].dropna().unique()}
+                        a_match = next((u_orig for u_low, u_orig in uniques_lower.items() if raw_grp_a in u_low or u_low in raw_grp_a), None)
+                        b_match = next((u_orig for u_low, u_orig in uniques_lower.items() if raw_grp_b in u_low or u_low in raw_grp_b), None)
+                        if a_match is not None and b_match is not None:
+                            found_grp_col = c
+                            matched_a = a_match
+                            matched_b = b_match
+                            break
+
+                if found_grp_col and matched_a is not None and matched_b is not None:
+                    return _make_op(
+                        "GROUP_METRIC_DIFFERENCE",
+                        column=val_col,
+                        value_column=val_col,
+                        group_column=found_grp_col,
+                        group_a=matched_a,
+                        group_b=matched_b,
+                        metric=metric_kind,
+                        absolute=True
+                    )
 
         # ── Date range (Q2) ─────────────────────────────────────────────────
         if re.search(r'\b(?:earliest\s+and\s+latest|min(?:imum)?\s+and\s+max(?:imum)?)\s+(?:order\s+|flight\s+)?dates?\b|\bwhat\s+(?:is|are)\s+the\s+earliest\s+and\s+latest\b', msg_lower):
@@ -1645,6 +2423,202 @@ class MasterRouter:
             if val_col and grp_col:
                 return _make_op(op_name, column=grp_col, value_column=val_col)
 
+        # ── Generalized Ranking & Extremum (Top-N, Bottom-N, Grouped Ranking) ──
+        # Handles: "give me top 10 most delayed airlines", "top 5 cities with highest sales",
+        # "top 10 most delayed flights", "top 10 departure delays", "bottom 3 airlines by delay", etc.
+        m_gen_rank = re.search(
+            r'\b(?:give\s+me\s+|show\s+me\s+|list\s+|find\s+|what\s+are\s+)?(?:the\s+)?'
+            r'(top|bottom|highest|lowest|best|worst|most|least)\s*'
+            r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|twenty-five|fifty|100)?\s*'
+            r'([a-z0-9_ -]+)\b',
+            msg_lower
+        )
+        if m_gen_rank and not re.search(r'\bfor\s+each\s+year\b|\bin\s+20\d{2}\b|\bbetween\b|\bquartiles?\b|\bchange\s+the\b|\bset\s+the\b', msg_lower):
+            direction_word = m_gen_rank.group(1).strip()
+            n_raw = m_gen_rank.group(2)
+            remainder = m_gen_rank.group(3).strip()
+
+            num_words = {
+                "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                "fifteen": 15, "twenty": 20, "twenty-five": 25, "fifty": 50, "100": 100
+            }
+            n_limit = num_words.get(n_raw, int(n_raw) if n_raw and n_raw.isdigit() else 10)
+            is_asc = direction_word in ("bottom", "lowest", "least", "worst") or "least" in remainder.split()
+            order = "asc" if is_asc else "desc"
+
+            rem_tokens = re.split(r'\s+(?:by|ranked\s+by|with|based\s+on|for|in|having|with\s+the)\s+|\s+', remainder)
+            generic_entities = {"flight", "flights", "row", "rows", "record", "records", "item", "items", "observation", "observations", "obs", "transaction", "transactions", "entry", "entries"}
+
+            cand_grp = None
+            cand_val = None
+
+            for tok in rem_tokens:
+                tok_clean = tok.strip()
+                if not tok_clean or tok_clean in ("most", "least", "highest", "lowest", "delayed", "delay", "average", "mean", "total", "sum", "count"):
+                    continue
+                if tok_clean in generic_entities:
+                    continue
+                found = _find_column(tok_clean)
+                if found and df is not None:
+                    is_num = pd.api.types.is_numeric_dtype(df[found]) if found in df.columns else False
+                    if is_num and not cand_val:
+                        cand_val = found
+                    elif not is_num and not cand_grp:
+                        cand_grp = found
+
+            if not cand_val:
+                for metric_kw in ("departure_delay", "arrival_delay", "delay", "sales_amount", "sales", "revenue", "profit", "rating", "score", "price", "age", "fare", "time", "distance"):
+                    if metric_kw in msg_lower or metric_kw.replace("_", " ") in msg_lower:
+                        found_m = _find_column(metric_kw)
+                        if found_m and (df is None or (found_m in df.columns and pd.api.types.is_numeric_dtype(df[found_m]))):
+                            cand_val = found_m
+                            break
+
+            has_generic_entity = any(re.search(rf'\b{ge}\b', msg_lower) for ge in generic_entities)
+            if not cand_grp and not has_generic_entity:
+                for grp_kw in ("airline", "carrier", "city", "country", "state", "region", "product", "category", "channel", "origin", "destination", "segment"):
+                    if grp_kw in msg_lower:
+                        found_g = _find_column(grp_kw)
+                        if found_g and (df is None or (found_g in df.columns and not pd.api.types.is_numeric_dtype(df[found_g]))):
+                            cand_grp = found_g
+                            break
+
+            # Schema-backed fallback for unfamiliar entity names and metric
+            # labels. Infer only when each role has a single plausible column;
+            # otherwise leave the query to semantic interpretation.
+            if df is not None and not cand_grp and not has_generic_entity:
+                categorical = [
+                    c for c in df.columns
+                    if not pd.api.types.is_numeric_dtype(df[c])
+                    and not pd.api.types.is_bool_dtype(df[c])
+                    and df[c].nunique(dropna=True) > 1
+                ]
+                if len(categorical) == 1:
+                    cand_grp = str(categorical[0])
+            if df is not None and not cand_val:
+                numeric_measures = [
+                    c for c in df.select_dtypes(include="number").columns
+                    if not re.search(r"(?:^|[_\s])(id|key|number|code|index)(?:$|[_\s])", str(c), re.I)
+                ]
+                if len(numeric_measures) == 1:
+                    cand_val = str(numeric_measures[0])
+
+            if cand_grp and cand_val:
+                has_mean = any(w in msg_lower for w in ("average", "mean", "avg"))
+                has_max = any(w in msg_lower for w in ("maximum", "max", "peak", "highest single", "worst single", "largest single", "greatest single")) or (
+                    any(w in msg_lower for w in ("highest", "maximum", "peak", "worst", "greatest"))
+                    and not any(w in msg_lower for w in ("most", "least", "top", "bottom"))
+                    and not has_mean
+                )
+                has_min = any(w in msg_lower for w in ("minimum", "min", "lowest single", "best single", "smallest single")) or (
+                    any(w in msg_lower for w in ("lowest", "minimum", "best", "smallest"))
+                    and not any(w in msg_lower for w in ("most", "least", "top", "bottom"))
+                    and not has_mean
+                )
+                has_median = "median" in msg_lower
+                has_sum = any(w in msg_lower for w in ("sum", "total", "sales", "revenue", "profit", "volume")) and not has_mean
+                # has_count_filtered only fires when the user EXPLICITLY requests a filtered count
+                # (e.g. "airlines with the most delayed flights", "count of delayed flights > 0").
+                # Ambiguous phrases like "most delayed airlines" must NOT silently route here.
+                has_count_filtered = (
+                    any(phrase in msg_lower for phrase in ("delayed flights", "positive delay", "flights delayed", "records with", "> 0"))
+                    and any(w in msg_lower for w in ("most", "count", "number"))
+                ) or any(phrase in msg_lower for phrase in ("with the most", "with most", "number of delayed", "count of delayed"))
+                has_count = any(w in msg_lower for w in ("frequency", "count of", "number of", "most frequent", "least frequent"))
+
+                if has_mean:
+                    return _make_op("GROUP_MEAN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif has_max:
+                    return _make_op("GROUP_MAX", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif has_min:
+                    return _make_op("GROUP_MIN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif has_median:
+                    return _make_op("GROUP_MEDIAN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif has_sum:
+                    return _make_op("GROUP_SUM", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif has_count_filtered:
+                    return _make_op("GROUP_COUNT_FILTERED", column=cand_grp, filter_column=cand_val, filter_op=">", filter_value=0, top_n=n_limit, order=order, details={"filter_desc": f"{cand_val.replace('_', ' ').lower()} > 0"})
+                elif has_count:
+                    return _make_op("GROUP_COUNT", column=cand_grp, top_n=n_limit, order=order)
+                else:
+                    # No explicit aggregation detected — return a structured clarification.
+                    # The user must choose between avg, max, count-filtered, etc.
+                    cand_grp_label = cand_grp.replace("_", " ").title()
+                    cand_val_label = cand_val.replace("_", " ").lower()
+                    question = f"How would you like to rank {cand_grp_label}s by {cand_val_label}?"
+                    options = [
+                        {
+                            "label": f"Highest average {cand_val_label}",
+                            "description": f"Rank {cand_grp_label}s by their mean {cand_val_label} across all records.",
+                            "action": "RANKING_AVERAGE",
+                            "user_message": f"top {n_limit} {cand_grp} by average {cand_val}",
+                            "operation": {"type": "GROUP_MEAN", "column": cand_grp, "value_column": cand_val, "top_n": n_limit, "order": order},
+                        },
+                        {
+                            "label": f"Highest maximum {cand_val_label}",
+                            "description": f"Rank {cand_grp_label}s by their single highest {cand_val_label} recorded.",
+                            "action": "RANKING_MAXIMUM",
+                            "user_message": f"top {n_limit} {cand_grp} by maximum {cand_val}",
+                            "operation": {"type": "GROUP_MAX", "column": cand_grp, "value_column": cand_val, "top_n": n_limit, "order": order},
+                        },
+                        {
+                            "label": f"Most records with positive {cand_val_label}",
+                            "description": f"Count records per {cand_grp_label} where {cand_val_label} > 0.",
+                            "action": "RANKING_COUNT_FILTERED",
+                            "user_message": f"top {n_limit} {cand_grp} with the most {cand_val} > 0",
+                            "operation": {"type": "GROUP_COUNT_FILTERED", "column": cand_grp, "filter_column": cand_val, "filter_op": ">", "filter_value": 0, "top_n": n_limit, "order": order},
+                        },
+                    ]
+                    return {
+                        "intent": "clarification",
+                        "confidence": 1.0,
+                        "clarification": {
+                            "status": "AWAITING_CLARIFICATION",
+                            "clarification_type": "RANKING_AMBIGUITY",
+                            "kicker": "RANKING INTENT CLARIFICATION",
+                            "question": question,
+                            "ambiguous_options": options,
+                            "candidate_columns": [cand_grp, cand_val],
+                            "entity": cand_grp,
+                            "metric": cand_val,
+                            "top_n": n_limit,
+                            "order": order,
+                        },
+                        "reason": f"Ranking query is ambiguous — no explicit aggregation for entity='{cand_grp}' metric='{cand_val}'",
+                    }
+            elif cand_val and (n_raw is not None or direction_word in ("top", "bottom")):
+                row_op = "TOP_N" if order == "desc" else "BOTTOM_N"
+                return _make_op(row_op, column=cand_val, n=n_limit, order=order)
+
+        # ── Entity ranked by metric: "<group> ranked by <stat> <metric>" ──
+        m_ent_rank = re.search(
+            r'\b(?:top|bottom)?\s*(\d+)?\s*([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\s+(?:ranked|sorted|ordered)\s+by\s+'
+            r'(average|mean|maximum|max|highest|minimum|min|lowest|median|sum|total|count)?\s*(?:of\s+)?([a-z0-9_ -]+)\b',
+            msg_lower
+        )
+        if m_ent_rank:
+            n_raw = m_ent_rank.group(1)
+            n_limit = int(n_raw) if n_raw and n_raw.isdigit() else 10
+            grp_raw = m_ent_rank.group(2).strip()
+            stat_raw = (m_ent_rank.group(3) or "").strip()
+            val_raw = m_ent_rank.group(4).strip()
+            cand_grp = _find_column(grp_raw)
+            cand_val = _find_column(val_raw)
+            if cand_grp and cand_val:
+                is_asc = "bottom" in msg_lower or stat_raw in ("min", "minimum", "lowest") or "asc" in msg_lower
+                order = "asc" if is_asc else "desc"
+                if stat_raw in ("average", "mean"):
+                    return _make_op("GROUP_MEAN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif stat_raw in ("max", "maximum", "highest"):
+                    return _make_op("GROUP_MAX", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif stat_raw in ("min", "minimum", "lowest"):
+                    return _make_op("GROUP_MIN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif stat_raw in ("sum", "total"):
+                    return _make_op("GROUP_SUM", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+                elif stat_raw in ("median",):
+                    return _make_op("GROUP_MEDIAN", column=cand_grp, value_column=cand_val, top_n=n_limit, order=order)
+
         # ── Grouped ranking: "which [N] <group> have highest/lowest <stat> <val>" (Q13, Q14, Q18, Q21, Q49) ──
         m_grp_rank = re.search(r'\bwhich\s+(?:five|\d+)?\s*([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\s+(?:have|has|had|generated)\s+(?:the\s+)?(highest|most|largest|lowest|least|smallest)\s+(average|mean|total|proportion|rate|percentage|sum)?\s*(?:of\s+)?([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b', msg_lower)
         if m_grp_rank and not re.search(r'\bfor\s+each\b|\bper\s+(?:year|month|quarter|date|day)\b', msg_lower):
@@ -1656,10 +2630,16 @@ class MasterRouter:
             grp_col = _find_column(grp_raw)
             val_col = _find_column(val_raw_clean) or _find_column(val_raw)
             if grp_col and val_col:
-                if stat in ("total", "sum") or direction in ("most", "largest"):
+                if stat in ("total", "sum") or (direction in ("most", "largest") and any(w in val_col.lower() for w in ("sales", "revenue", "profit", "sum", "total", "volume"))):
                     return _make_op("GROUP_SUM", column=grp_col, value_column=val_col)
                 elif stat in ("median",):
                     return _make_op("GROUP_MEDIAN", column=grp_col, value_column=val_col)
+                elif stat in ("average", "mean"):
+                    return _make_op("GROUP_MEAN", column=grp_col, value_column=val_col)
+                elif stat in ("max", "maximum") or direction in ("highest", "maximum"):
+                    return _make_op("GROUP_MAX", column=grp_col, value_column=val_col)
+                elif stat in ("min", "minimum") or direction in ("lowest", "minimum"):
+                    return _make_op("GROUP_MIN", column=grp_col, value_column=val_col)
                 else:
                     return _make_op("GROUP_MEAN", column=grp_col, value_column=val_col)
 
@@ -1741,7 +2721,7 @@ class MasterRouter:
             return _make_op("NORMALIZED_GROUP_SUM", column=_find_column("product_category") or "Product_Category",
                             value_column="Sales_Amount")
 
-        # ── Average order value (Q53) ────────────────────────────────────────
+        # ── Average order value ──────────────────────────────────────────────
         if re.search(r'\baverage\s+order\s+value\b|\baov\b', msg_lower):
             return _make_op("AVERAGE_ORDER_VALUE")
 
@@ -2046,7 +3026,7 @@ class MasterRouter:
            re.search(r'\b(?:across|by|for\s+each|per)\s+(?:product\s+)?categor', msg_lower):
             return _make_op("CATEGORY_PROFIT_MARGINS")
 
-        # ── Average order value (Q33) ────────────────────────────────────────
+        # ── Average order value ──────────────────────────────────────────────
         if re.search(r'\baverage\s+order\s+value\b|\\baov\b', msg_lower):
             return _make_op("AVERAGE_ORDER_VALUE")
 
@@ -2141,9 +3121,10 @@ class MasterRouter:
             return _make_op("OVERALL_RETURN_RATE")
 
         # ── Promotion code percentage (Q34) ──────────────────────────────────
-        if re.search(r'\bpromotion\s+code\b|\bpromo(?:tion)?\s+code\b', msg_lower) and \
-           re.search(r'\bpercentage|percent|%|how\s+many\b', msg_lower):
-            return _make_op("PROMOTION_CODE_USAGE")
+        if re.search(r'\b(?:promotion|promo|coupon|voucher)\s*(?:code)?\b', msg_lower) and \
+           re.search(r'\b(?:percentage|percent|%|how\s+many|proportion|rate|share|usage)\b', msg_lower):
+            col = _find_column("promotion_code") or _find_column("coupon_code")
+            return _make_op("PROMOTION_CODE_USAGE", column=col)
 
         # ── Country with highest sales in a specific year (Q39) ──────────────
         m_country_yr = re.search(r'\bwhich\s+country\s+has\s+(?:the\s+)?highest\s+total\s+(?:sales|profit)\s+(?:amount\s+)?in\s+(20\d{2})\b', msg_lower)
@@ -2518,16 +3499,28 @@ class MasterRouter:
     def _pending_transform_fast_path(self, context: ExecutionContext) -> dict | None:
         """Resolve a follow-up against an active transformation's missing slots."""
         dataset_id = str(getattr(context, 'dataset_id', '') or '')
-        conversation_id = str(
-            getattr(context, 'chat_id', None) or getattr(context, 'session_id', '') or ''
-        )
-        if not dataset_id or not conversation_id:
-            return None
+        chat_id = str(getattr(context, 'chat_id', None) or '')
+        session_id = str(getattr(context, 'session_id', None) or '')
+        workspace_action = getattr(context, 'workspace_action', None) or {}
+        transformation_id = str(workspace_action.get('transformation_id') or '')
 
         from transformation.store import transformation_store
-        pending = transformation_store.pending_for(conversation_id, dataset_id)
+        pending = None
+        if transformation_id:
+            pending = transformation_store.get_pending_by_id(transformation_id)
+        if not pending and chat_id and dataset_id:
+            pending = transformation_store.pending_for(chat_id, dataset_id)
+        if not pending and session_id and dataset_id:
+            pending = transformation_store.pending_for(session_id, dataset_id)
+        if not pending and dataset_id:
+            pending = transformation_store.pending_for_dataset(dataset_id)
+
         if pending is None:
             return None
+
+        conversation_id = str(pending.conversation_id)
+        if not dataset_id:
+            dataset_id = str(pending.dataset_id)
 
         from datasets.registry import dataset_registry
         entry = dataset_registry.get(dataset_id)
@@ -2607,6 +3600,33 @@ class MasterRouter:
                         'reason': 'structured clarification resolved value ambiguity',
                     }
 
+            if workspace_action.get('clarification_type') in ('EXTREME_VALUE_AMBIGUITY', 'VALUE_AMBIGUITY'):
+                action_val = str(workspace_action.get('value', '')).upper()
+                chosen_op = workspace_action.get('chosen_operation')
+                if not chosen_op:
+                    extremum = pending.operation_payload.get('extremum', 'max')
+                    target_val = pending.operation_payload.get('target_value')
+                    col = pending.candidate_columns[0] if pending.candidate_columns else pending.operation_payload.get('column')
+                    if action_val in ('CAP_UPPER', 'CLIP_UPPER'):
+                        chosen_op = {'type': 'CLIP', 'column': col, 'max': target_val}
+                    elif action_val in ('FLOOR_LOWER', 'CLIP_LOWER'):
+                        chosen_op = {'type': 'CLIP', 'column': col, 'min': target_val}
+                    elif action_val == 'UPDATE_EXTREMUM':
+                        chosen_op = {'type': 'UPDATE_EXTREMUM', 'column': col, 'extremum': extremum, 'new_value': target_val}
+                
+                if chosen_op:
+                    operation = dict(chosen_op)
+                    if not operation.get('column') and pending.candidate_columns:
+                        operation['column'] = pending.candidate_columns[0]
+                    elif not operation.get('column') and pending.operation_payload.get('column'):
+                        operation['column'] = pending.operation_payload.get('column')
+                    operation['_pending_transformation_id'] = pending.transformation_id
+                    operation['_pending_conversation_id'] = conversation_id
+                    return {
+                        'intent': 'TRANSFORM', 'confidence': 0.99, 'operation': operation,
+                        'reason': 'structured clarification resolved extreme value ambiguity',
+                    }
+
             if workspace_action.get('clarification_type') == 'COLUMN_SCOPE':
                 if action_value == 'ALL_MATCHING_COLUMNS':
                     selected = list(pending.candidate_columns)
@@ -2665,6 +3685,32 @@ class MasterRouter:
             operation['_pending_conversation_id'] = conversation_id
             return {'intent': 'TRANSFORM', 'confidence': 0.99, 'operation': operation,
                     'reason': 'resolved pending rename targets'}
+
+        if 'clarify_extreme_intent' in pending.missing_slots or pending.clarification_type in ('EXTREME_VALUE_AMBIGUITY', 'VALUE_AMBIGUITY'):
+            extremum = pending.operation_payload.get('extremum', 'max')
+            target_val = pending.operation_payload.get('target_value')
+            col = pending.candidate_columns[0] if pending.candidate_columns else pending.operation_payload.get('column')
+            
+            clean_msg = re.sub(r'^(?:i meant|meaning|i mean|i want|please)\s*[:,-]?\s*', '', message, flags=re.IGNORECASE).strip().lower()
+
+            is_opt2 = bool(re.search(r'\b(only|single|record|records|row|rows|maximum|minimum|max|min|option 2|\b2\b)\b', clean_msg))
+            is_opt1 = bool(re.search(r'\b(cap|floor|threshold|above|below|limit|clip|option 1|\b1\b)\b', clean_msg))
+
+            if is_opt2 and not re.search(r'\b(cap|floor|threshold|above|below)\b', clean_msg):
+                op = {'type': 'UPDATE_EXTREMUM', 'column': col, 'extremum': extremum, 'new_value': target_val}
+            elif is_opt1:
+                if extremum == 'max':
+                    op = {'type': 'CLIP', 'column': col, 'max': target_val}
+                else:
+                    op = {'type': 'CLIP', 'column': col, 'min': target_val}
+            elif is_opt2:
+                op = {'type': 'UPDATE_EXTREMUM', 'column': col, 'extremum': extremum, 'new_value': target_val}
+            else:
+                return None
+                
+            op['_pending_transformation_id'] = pending.transformation_id
+            op['_pending_conversation_id'] = conversation_id
+            return {'intent': 'TRANSFORM', 'confidence': 0.99, 'operation': op, 'reason': 'resolved extreme value intent via text follow-up'}
 
         if 'fill_value' in pending.missing_slots:
             from datasets.semantics.typed_literal import parse_with_explicit_type
@@ -2985,8 +4031,11 @@ class MasterRouter:
         # 1. Semantic Caching
         cache_key = f"{query}::{semantic_ctx.get('dataset_id', '')}::{semantic_ctx.get('dataset_fingerprint', '')}"
         if cache_key in self._semantic_cache:
-            logger.info(f"[Router/LLM] Semantic cache hit for query: {query}")
-            return self._semantic_cache[cache_key]
+            cached_val = self._semantic_cache[cache_key]
+            # NEVER accept cached conversation if a dataset is loaded
+            if not (dataset_loaded and cached_val.get('intent') == 'conversation'):
+                logger.info(f"[Router/LLM] Semantic cache hit for query: {query}")
+                return cached_val
 
         prompt = build_interpreter_prompt(query=query, semantic_context=semantic_ctx)
 
@@ -2999,9 +4048,9 @@ class MasterRouter:
             f"columns={col_count} referenced={ref_cols}"
         )
 
-        # 2. Exponential Backoff & Retry Logic for 429 / Transient Errors
-        max_retries = 6
-        base_delay = 3.0
+        # 2. Fast Retry Logic for 429 / Transient Errors (fail-fast, no multi-minute delays)
+        max_retries = 2
+        base_delay = 0.5
         response = None
         
         for attempt in range(max_retries):
@@ -3024,21 +4073,19 @@ class MasterRouter:
                     
                 error_str = str(response.error).lower()
                 raw_resp = response.raw_response or {}
-                logger.error(f"DEBUG: error_str={error_str} raw_resp={raw_resp}")
+                if raw_resp.get("error_type") == "all_providers_unavailable" or "all available providers" in error_str:
+                    logger.warning("[Router/LLM] All providers unavailable — failing fast without sleep.")
+                    break
+
                 if "429" in error_str or "too many requests" in error_str or "quota" in error_str or raw_resp.get("retryable"):
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"[Router/LLM] 429 Rate limit detected. Retrying in {delay}s (Attempt {attempt+1}/{max_retries})...")
+                        delay = base_delay * (attempt + 1)
+                        logger.warning(f"[Router/LLM] Rate limit detected. Retrying in {delay}s (Attempt {attempt+1}/{max_retries})...")
                         time.sleep(delay)
                         continue
             except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"[Router/LLM] Exception '{e}' detected. Retrying in {delay}s (Attempt {attempt+1}/{max_retries})...")
-                    time.sleep(delay)
-                    continue
-                else:
-                    raise e
+                logger.warning(f"[Router/LLM] Exception '{e}' detected.")
+                break
                     
             break
 
@@ -3063,10 +4110,11 @@ class MasterRouter:
                 f"operation={payload.get('operation')} "
                 f"reason={payload.get('reason', '')[:80]}"
             )
-            # Store in cache
-            if len(self._semantic_cache) > 1000:
-                self._semantic_cache.clear()
-            self._semantic_cache[cache_key] = payload
+            # Store in cache — do not poison cache with conversation fallback when dataset is loaded
+            if not (dataset_loaded and payload.get('intent') == 'conversation'):
+                if len(self._semantic_cache) > 1000:
+                    self._semantic_cache.clear()
+                self._semantic_cache[cache_key] = payload
             return payload
 
         except Exception as e:

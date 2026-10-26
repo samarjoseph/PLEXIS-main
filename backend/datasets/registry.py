@@ -63,10 +63,13 @@ class DatasetRegistry:
             
             user_id = None
             if has_request_context():
-                from utils.response import _resolve_user
-                current_user, _ = _resolve_user(request)
-                if current_user:
-                    user_id = uuid.UUID(str(current_user.user_id))
+                try:
+                    from db.identity import identity_resolver
+                    current_user = identity_resolver.resolve(request)
+                    if current_user:
+                        user_id = current_user.user_id
+                except Exception:
+                    pass
             
             from db.session import get_db
             from db.services.dataset_service import dataset_service

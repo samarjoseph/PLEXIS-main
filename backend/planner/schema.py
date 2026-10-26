@@ -100,6 +100,7 @@ SUPPORTED_OPERATIONS = frozenset({
     "sort",
     # Grouping
     "group_by", "group_mean", "group_sum", "group_count",
+    "group_count_filtered",
     "group_min", "group_max", "group_median", "pair_frequencies",
     "compound_filter",
     "crosstab", "grouped_rate", "two_factor_aggregation",
@@ -110,6 +111,7 @@ SUPPORTED_OPERATIONS = frozenset({
     "median_split_comparison",
     "tail_risk_group_rate",
     "date_month_audit",
+    "audit_numeric_conversion",
     # Quality
     "missing_values", "duplicates", "unique_values", "outliers",
     # Distribution
@@ -120,6 +122,7 @@ SUPPORTED_OPERATIONS = frozenset({
     "locate_row", "locate_rows",
     # Comparison
     "compare_groups", "compare_columns",
+    "group_metric_difference", "overall_event_rate", "derived_group_comparison",
 })
 
 # ── Plan step operations (executor level) ─────────────────────────────────────
@@ -169,8 +172,8 @@ class AnalyticalPlan:
     before being passed to PandasExecutor.
     """
 
-    intent: str                              # Descriptive label, e.g. "highest_age"
-    operation: str                           # Canonical operation from SUPPORTED_OPERATIONS
+    intent: str = "DATA_OPERATION"           # Descriptive label, e.g. "highest_age"
+    operation: str = ""                      # Canonical operation from SUPPORTED_OPERATIONS
     target_column: Optional[str] = None      # Exact column name (validated against schema)
     columns: List[str] = field(default_factory=list)  # Secondary columns
     parameters: Dict[str, Any] = field(default_factory=dict)

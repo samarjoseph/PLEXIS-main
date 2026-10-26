@@ -57,9 +57,10 @@ class MistralProvider(IProviderAdapter):
         
         messages = request.messages.copy() if request.messages else []
         if not messages and request.task:
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
             messages.append({"role": "user", "content": request.task})
+
+        if request.system_prompt and not any(m.get("role") == "system" for m in messages):
+            messages.insert(0, {"role": "system", "content": request.system_prompt})
         
         model_name = self._resolve_model(request)
         
@@ -78,7 +79,7 @@ class MistralProvider(IProviderAdapter):
         retry_after = None
 
         try:
-            response = requests.post(self.base_url, headers=headers, json=payload, timeout=60)
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=(3.0, 10.0))
             status_code = response.status_code
             resp_headers = dict(response.headers)
             if "retry-after" in resp_headers:
@@ -155,9 +156,10 @@ class MistralProvider(IProviderAdapter):
         effective_key = api_key or self.api_key
         messages = request.messages.copy() if request.messages else []
         if not messages and request.task:
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
             messages.append({"role": "user", "content": request.task})
+
+        if request.system_prompt and not any(m.get("role") == "system" for m in messages):
+            messages.insert(0, {"role": "system", "content": request.system_prompt})
 
         model_name = self._resolve_model(request)
 

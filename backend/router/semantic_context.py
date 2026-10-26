@@ -153,6 +153,8 @@ class SemanticContextBuilder:
         """
         result = {
             "dataset_loaded": False,
+            "dataset_id": "",
+            "dataset_fingerprint": "",
             "dataset_filename": None,
             "columns": [],
             "referenced_columns": [],
@@ -163,7 +165,15 @@ class SemanticContextBuilder:
         # ── 1. Dataset schema ─────────────────────────────────────────────────
         if getattr(context, 'dataset_id', None):
             result["dataset_loaded"] = True
+            result["dataset_id"] = str(context.dataset_id)
             result["dataset_filename"] = getattr(context, 'dataset_filename', None) or ""
+            try:
+                from datasets.registry import dataset_registry
+                entry = dataset_registry.get_by_id(context.dataset_id)
+                if entry:
+                    result["dataset_fingerprint"] = getattr(entry, 'file_fingerprint', '') or ""
+            except Exception:
+                pass
 
             columns = self._extract_columns(context)
             result["columns"] = columns

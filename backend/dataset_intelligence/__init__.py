@@ -27,11 +27,17 @@ from .models import (
     SemanticMap,
 )
 from .dataset_memory_builder import dataset_memory_builder
+from .semantic_resolver import SemanticSchemaResolver, semantic_schema_resolver, get_semantic_resolver, SemanticResolutionResult, SemanticRole
 
 __all__ = [
     "DatasetIntelligenceEngine",
     "dataset_intelligence_engine",
     "DatasetKnowledgeObject",
+    "SemanticSchemaResolver",
+    "semantic_schema_resolver",
+    "get_semantic_resolver",
+    "SemanticResolutionResult",
+    "SemanticRole",
     "ColumnRole",
     "ColumnSchema",
     "ColumnSemanticType",
@@ -48,4 +54,9 @@ __all__ = [
     "PredictedQuestion",
     "DatasetPresentation",
     "dataset_memory_builder",
+    "SemanticSchemaResolver",
+    "semantic_schema_resolver",
+    "SemanticResolutionResult",
+    "SemanticRole",
 ]
+

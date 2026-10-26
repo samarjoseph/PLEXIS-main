@@ -122,10 +122,76 @@ class ModelRegistry:
 model_registry = ModelRegistry()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 0. GROQ ULTRA-FAST MODELS (When Config.GROQ_API_KEY is present)
+# ══════════════════════════════════════════════════════════════════════════════
+if Config.GROQ_API_KEY:
+    # GROQ FAST MODEL: 20B ultra-fast routing & conversation (Priority 0)
+    model_registry.register(ModelMetadata(
+        model_id=Config.GROQ_MODEL,  # openai/gpt-oss-20b
+        provider="groq",
+        model_name=Config.GROQ_MODEL,
+        context_window=131072,
+        max_output_tokens=8192,
+        supports_vision=False,
+        supports_json_mode=True,
+        supports_tool_calling=True,
+        supports_streaming=True,
+        supports_reasoning=False,
+        task_affinities={
+            "classification": 1.0,
+            "router": 1.0,
+            "chat": 1.0,
+            "conversation": 1.0,
+            "planner": 0.9,
+            "interpreter": 0.9,
+            "title": 1.0,
+            "transformation_planning": 0.95,
+            "transformation": 0.95,
+        },
+        avg_latency_ms=180.0,
+        priority=0,
+        health_score=1.0,
+    ))
+
+    # GROQ FRONTIER MODEL: 120B reasoning/analysis (Priority 1)
+    model_registry.register(ModelMetadata(
+        model_id=Config.GROQ_MODEL_HIGH_REASONING,  # openai/gpt-oss-120b
+        provider="groq",
+        model_name=Config.GROQ_MODEL_HIGH_REASONING,
+        context_window=131072,
+        max_output_tokens=8192,
+        supports_vision=False,
+        supports_json_mode=True,
+        supports_tool_calling=True,
+        supports_streaming=True,
+        supports_reasoning=True,
+        task_affinities={
+            "classification": 0.95,
+            "router": 0.95,
+            "planner": 1.0,
+            "interpreter": 1.0,
+            "insight_synthesizer": 1.0,
+            "explanation": 1.0,
+            "spreadsheet_interpret": 1.0,
+            "analysis": 1.0,
+            "complex_analysis": 1.0,
+            "report": 1.0,
+            "high_reasoning": 1.0,
+            "chat": 0.95,
+            "conversation": 0.95,
+            "presentation": 1.0,
+            "title": 0.9,
+        },
+        avg_latency_ms=300.0,
+        priority=1,
+        health_score=1.0,
+    ))
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 1. ROUTER ROLE MODELS
 # ══════════════════════════════════════════════════════════════════════════════
 
-# PRIMARY ROUTER: Mistral Small (Priority 0)
+# PRIMARY ROUTER: Mistral Small (Priority 1 if Groq active, else Priority 0)
 model_registry.register(ModelMetadata(
     model_id=Config.ROUTER_MISTRAL_MODEL,
     provider="mistral",
@@ -142,7 +208,7 @@ model_registry.register(ModelMetadata(
         "router": 1.0,
     },
     avg_latency_ms=450.0,
-    priority=0,
+    priority=1 if Config.GROQ_API_KEY else 0,
     health_score=1.0,
 ))
 
@@ -194,6 +260,12 @@ model_registry.register(ModelMetadata(
         "analysis": 1.0,
         "complex_analysis": 1.0,
         "report": 1.0,
+        # Router & Classification tasks (fast fallback)
+        "classification": 0.95,
+        "router": 0.95,
+        # Transformation tasks
+        "transformation_planning": 0.95,
+        "transformation": 0.95,
         # Conversation tasks
         "chat": 1.0,
         "conversation": 1.0,
@@ -258,23 +330,62 @@ model_registry.register(ModelMetadata(
         # Dedicated Transformation Role (Priority 0 for transformation)
         "transformation_planning": 1.0,
         "transformation": 1.0,
-        # Secondary Analysis & Conversation (Priority 2 fallback)
-        "planner": 0.8,
-        "interpreter": 0.8,
-        "insight_synthesizer": 0.8,
-        "explanation": 0.8,
-        "spreadsheet_interpret": 0.8,
-        "analysis": 0.8,
-        "complex_analysis": 0.8,
-        "report": 0.8,
-        "chat": 0.8,
-        "conversation": 0.8,
-        "presentation": 0.8,
-        "title": 0.8,
-        "stream": 0.8,
+        # Classification & Router Fallback (Fast, resilient failover)
+        "classification": 0.95,
+        "router": 0.95,
+        # Secondary Analysis & Conversation (Priority 1 fallback)
+        "planner": 0.9,
+        "interpreter": 0.9,
+        "insight_synthesizer": 0.9,
+        "explanation": 0.9,
+        "spreadsheet_interpret": 0.9,
+        "analysis": 0.9,
+        "complex_analysis": 0.9,
+        "report": 0.9,
+        "chat": 0.9,
+        "conversation": 0.9,
+        "presentation": 0.9,
+        "title": 0.9,
+        "stream": 0.9,
     },
     avg_latency_ms=750.0,
-    priority=2,  # Will be treated as priority 0 when task is transformation_planning
+    priority=1,  # Priority 0 for transformation; Priority 1 fallback for all other tasks
+    health_score=1.0,
+))
+
+# BACKUP GEMINI MODEL: gemini-2.5-flash (High speed, reliable backup)
+model_registry.register(ModelMetadata(
+    model_id="gemini-2.5-flash",
+    provider="gemini",
+    model_name="gemini-2.5-flash",
+    context_window=1048576,
+    max_output_tokens=8192,
+    supports_vision=True,
+    supports_json_mode=True,
+    supports_tool_calling=True,
+    supports_streaming=True,
+    supports_reasoning=True,
+    task_affinities={
+        "transformation_planning": 0.95,
+        "transformation": 0.95,
+        "classification": 0.9,
+        "router": 0.9,
+        "planner": 0.85,
+        "interpreter": 0.85,
+        "insight_synthesizer": 0.85,
+        "explanation": 0.85,
+        "spreadsheet_interpret": 0.85,
+        "analysis": 0.85,
+        "complex_analysis": 0.85,
+        "report": 0.85,
+        "chat": 0.85,
+        "conversation": 0.85,
+        "presentation": 0.85,
+        "title": 0.85,
+        "stream": 0.85,
+    },
+    avg_latency_ms=650.0,
+    priority=2,
     health_score=1.0,
 ))
 

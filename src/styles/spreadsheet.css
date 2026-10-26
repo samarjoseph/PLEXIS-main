@@ -1431,3 +1431,34 @@
   overflow: hidden;
   box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(124,58,237,0.2);
 }
+
+
+/* Responsive Spreadsheet Toolbar */
+@media (max-width: 768px) {
+  .ssg-toolbar {
+    padding: 4px 8px;
+    min-height: 40px;
+    overflow-x: hidden;
+  }
+  .ssg-toolbar__left {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ssg-toolbar__left::-webkit-scrollbar {
+    display: none;
+  }
+  .ssg-cell-ref {
+    width: 50px;
+    height: 26px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .ssg-toolbar__dims {
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .ssg-toolbar__right {
+    flex-shrink: 0;
+  }
+}

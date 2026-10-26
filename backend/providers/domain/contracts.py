@@ -45,6 +45,7 @@ class AIRequest(BaseModel):
     # Optional parameters
     temperature: float = 0.7
     max_tokens: Optional[int] = None
+    model_id: Optional[str] = None
 
 class IProviderAdapter:
     """
