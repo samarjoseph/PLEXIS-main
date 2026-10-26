@@ -124,6 +124,9 @@ class DatasetVersion(Base):
 
     operation_label = Column(String(500), nullable=False)     # e.g. "Fill missing with 0"
     version_number = Column(Integer, nullable=False, server_default="1")   # sequential per original_dataset_id
+    revision = Column(Integer, nullable=True, server_default="0")
+    storage_account = Column(String(50), nullable=True, server_default="primary")
+    storage_key = Column(String(1024), nullable=True)
     changed_cells_count = Column(Integer, nullable=False)
     metadata_json = Column(JSONB, nullable=True)              # extra info: op type, affected cols, etc.
 

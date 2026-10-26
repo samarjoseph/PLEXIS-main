@@ -106,6 +106,25 @@ class Config:
     UPLOAD_FOLDER: str = os.environ.get("UPLOAD_FOLDER", "storage/uploads")
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+    # ── Object Storage (Cloudflare R2 / S3-compatible) ────────────────────────
+    # Account A (Primary)
+    R2_ACCOUNT_ID: str = (os.environ.get("R2_ACCOUNT_ID") or os.environ.get("R2_A_ACCOUNT_ID") or "").strip()
+    R2_ACCESS_KEY_ID: str = (os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("R2_A_ACCESS_KEY_ID") or "").strip()
+    R2_SECRET_ACCESS_KEY: str = (os.environ.get("R2_SECRET_ACCESS_KEY") or os.environ.get("R2_A_SECRET_ACCESS_KEY") or "").strip()
+    R2_BUCKET_NAME: str = (os.environ.get("R2_BUCKET_NAME") or os.environ.get("R2_A_BUCKET_NAME") or "plexis-datasets").strip()
+    R2_ENDPOINT_URL: str = (os.environ.get("R2_ENDPOINT_URL") or os.environ.get("R2_A_ENDPOINT_URL") or "").strip()
+
+    # Account B (Secondary / Optional)
+    R2_B_ACCOUNT_ID: str = os.environ.get("R2_B_ACCOUNT_ID", "").strip()
+    R2_B_ACCESS_KEY_ID: str = os.environ.get("R2_B_ACCESS_KEY_ID", "").strip()
+    R2_B_SECRET_ACCESS_KEY: str = os.environ.get("R2_B_SECRET_ACCESS_KEY", "").strip()
+    R2_B_BUCKET_NAME: str = os.environ.get("R2_B_BUCKET_NAME", "").strip()
+    R2_B_ENDPOINT_URL: str = os.environ.get("R2_B_ENDPOINT_URL", "").strip()
+
+    # Spreadsheet Snapshot Compaction
+    SNAPSHOT_INTERVAL_ACTIONS: int = int(os.environ.get("SNAPSHOT_INTERVAL_ACTIONS", "20"))
+    MAX_ACTION_HISTORY_DEPTH: int = int(os.environ.get("MAX_ACTION_HISTORY_DEPTH", "100"))
+
     # PostgreSQL database URL with postgres:// -> postgresql:// normalization for Supabase/Render
     _RAW_DB_URL: str = os.environ.get("DATABASE_URL", "").strip()
     DATABASE_URL: str = (

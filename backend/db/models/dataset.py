@@ -35,6 +35,9 @@ class Dataset(Base):
     )
     original_filename = Column(String(500), nullable=False)
     stored_filename = Column(String(500), nullable=True)
+    storage_account = Column(String(50), nullable=False, server_default="primary")
+    storage_key = Column(String(500), nullable=True)
+    current_revision = Column(Integer, nullable=False, server_default="0")
     mime_type = Column(String(100), nullable=True)
     file_size = Column(BigInteger, nullable=True)
     file_hash = Column(String(64), nullable=False, index=True)  # SHA-256 hex

@@ -619,3 +619,179 @@ def _parse_operation_json_heuristic(query: str, columns: list) -> dict:
         'confidence': 0.0,
         'source': 'heuristic',
     }
+
+
+# ─── Spreadsheet Editing and Revision Routes ────────────────────────────────
+
+@spreadsheet_bp.route('/edit', methods=['POST'])
+def edit_cell():
+    """
+    Apply a single cell edit with optimistic concurrency check.
+    """
+    from db.session import get_db
+    from spreadsheet.persistence import spreadsheet_history_manager, ConcurrencyConflictError
+
+    data = request.get_json(silent=True) or {}
+    dataset_id = str(data.get('dataset_id') or '').strip()
+    if not dataset_id:
+        return jsonify({'success': False, 'error': 'dataset_id is required'}), 400
+
+    if 'row' not in data or 'col' not in data:
+        return jsonify({'success': False, 'error': 'row and col are required'}), 400
+
+    try:
+        row_idx = int(data['row'])
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'row must be an integer'}), 400
+
+    col_name = str(data['col'])
+    new_value = data.get('value')
+    base_revision = int(data.get('base_revision', 0))
+
+    db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'error': 'Database unavailable'}), 500
+
+    try:
+        result = spreadsheet_history_manager.apply_cell_edit(
+            db=db,
+            dataset_id=dataset_id,
+            row_idx=row_idx,
+            col_name=col_name,
+            new_value=new_value,
+            base_revision=base_revision,
+        )
+        return jsonify(result), 200
+    except ConcurrencyConflictError as cce:
+        return jsonify({
+            'success': False,
+            'conflict': True,
+            'error': str(cce),
+            'expected_revision': cce.expected_revision,
+            'actual_revision': cce.actual_revision,
+        }), 409
+    except (IndexError, KeyError, ValueError) as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 400
+    except Exception as e:
+        logger.error("[spreadsheet/edit] Error: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@spreadsheet_bp.route('/batch-edit', methods=['POST'])
+def batch_edit():
+    """
+    Apply a batch of cell edits atomically with optimistic concurrency check.
+    """
+    from db.session import get_db
+    from spreadsheet.persistence import spreadsheet_history_manager, ConcurrencyConflictError
+
+    data = request.get_json(silent=True) or {}
+    dataset_id = str(data.get('dataset_id') or '').strip()
+    if not dataset_id:
+        return jsonify({'success': False, 'error': 'dataset_id is required'}), 400
+
+    edits = data.get('edits')
+    if not isinstance(edits, list) or not edits:
+        return jsonify({'success': False, 'error': 'edits list is required and cannot be empty'}), 400
+
+    base_revision = int(data.get('base_revision', 0))
+
+    db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'error': 'Database unavailable'}), 500
+
+    try:
+        result = spreadsheet_history_manager.apply_batch_edit(
+            db=db,
+            dataset_id=dataset_id,
+            edits=edits,
+            base_revision=base_revision,
+        )
+        return jsonify(result), 200
+    except ConcurrencyConflictError as cce:
+        return jsonify({
+            'success': False,
+            'conflict': True,
+            'error': str(cce),
+            'expected_revision': cce.expected_revision,
+            'actual_revision': cce.actual_revision,
+        }), 409
+    except (IndexError, KeyError, ValueError) as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 400
+    except Exception as e:
+        logger.error("[spreadsheet/batch-edit] Error: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@spreadsheet_bp.route('/undo', methods=['POST'])
+def undo_action():
+    """
+    Undo the latest committed spreadsheet action.
+    """
+    from db.session import get_db
+    from spreadsheet.persistence import spreadsheet_history_manager
+
+    data = request.get_json(silent=True) or {}
+    dataset_id = str(data.get('dataset_id') or '').strip()
+    if not dataset_id:
+        return jsonify({'success': False, 'error': 'dataset_id is required'}), 400
+
+    db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'error': 'Database unavailable'}), 500
+
+    try:
+        result = spreadsheet_history_manager.undo(db=db, dataset_id=dataset_id)
+        status_code = 200 if result.get('success') else 404
+        return jsonify(result), status_code
+    except Exception as e:
+        logger.error("[spreadsheet/undo] Error: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@spreadsheet_bp.route('/redo', methods=['POST'])
+def redo_action():
+    """
+    Redo the next undone spreadsheet action.
+    """
+    from db.session import get_db
+    from spreadsheet.persistence import spreadsheet_history_manager
+
+    data = request.get_json(silent=True) or {}
+    dataset_id = str(data.get('dataset_id') or '').strip()
+    if not dataset_id:
+        return jsonify({'success': False, 'error': 'dataset_id is required'}), 400
+
+    db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'error': 'Database unavailable'}), 500
+
+    try:
+        result = spreadsheet_history_manager.redo(db=db, dataset_id=dataset_id)
+        status_code = 200 if result.get('success') else 404
+        return jsonify(result), status_code
+    except Exception as e:
+        logger.error("[spreadsheet/redo] Error: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@spreadsheet_bp.route('/history/<dataset_id>', methods=['GET'])
+def get_action_history(dataset_id: str):
+    """
+    Retrieve full persistent action history, current revision, and undo/redo capabilities.
+    """
+    from db.session import get_db
+    from spreadsheet.persistence import spreadsheet_history_manager
+
+    db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'error': 'Database unavailable'}), 500
+
+    try:
+        result = spreadsheet_history_manager.get_history(db=db, dataset_id=dataset_id)
+        return jsonify({'success': True, **result}), 200
+    except ValueError as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 404
+    except Exception as e:
+        logger.error("[spreadsheet/history] Error: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500

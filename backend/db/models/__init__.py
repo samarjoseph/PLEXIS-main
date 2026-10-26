@@ -11,6 +11,7 @@ from .result_row import AnalysisResultRow
 from .analysis_action import AnalysisAction
 from .early_access import EarlyAccessSubmission
 from .transformation import TransformationPlan, DatasetVersion
+from .spreadsheet_action import SpreadsheetAction
 
 __all__ = [
     "User",
@@ -28,4 +29,5 @@ __all__ = [
     "EarlyAccessSubmission",
     "TransformationPlan",
     "DatasetVersion",
+    "SpreadsheetAction",
 ]

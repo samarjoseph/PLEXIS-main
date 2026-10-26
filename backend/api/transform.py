@@ -211,6 +211,25 @@ def undo_transformation():
         if entry is None:
             return jsonify({'error': 'Dataset not found'}), 404
 
+                # ── Check durable spreadsheet history first ──
+        db = get_db()
+        if db is not None:
+            try:
+                from spreadsheet.persistence import spreadsheet_history_manager
+                history_info = spreadsheet_history_manager.get_history(db, dataset_id)
+                if history_info.get('can_undo'):
+                    res = spreadsheet_history_manager.undo(db, dataset_id)
+                    if res.get('success'):
+                        return jsonify({
+                            'success': True,
+                            'message': res.get('message'),
+                            'restored_rows': res.get('restored_rows'),
+                            'restored_columns': res.get('restored_columns'),
+                            'undo_depth': res.get('current_revision'),
+                        }), 200
+            except Exception as e:
+                logger.debug('[transform/undo] spreadsheet history undo skipped: %s', e)
+
         # ── Primary: in-memory undo history ──
         if transformation_history.has_history(dataset_id):
             undo_entry = transformation_history.pop(dataset_id)
@@ -474,3 +493,27 @@ def _db_plan_to_contract(db_plan) -> Optional['TransformationPlan']:
     except Exception as e:
         logger.warning('[_db_plan_to_contract] Failed: %s', e)
         return None
+
+@transform_bp.route('/redo', methods=['POST'])
+def redo_transformation():
+    """
+    Redo the next undone transformation / action for a dataset.
+    """
+    from db.session import get_db
+    data = request.get_json(silent=True) or {}
+    dataset_id = (data.get('dataset_id') or '').strip()
+    if not dataset_id:
+        return jsonify({'error': 'dataset_id is required'}), 400
+
+    db = get_db()
+    if db is None:
+        return jsonify({'error': 'Database unavailable'}), 500
+
+    try:
+        from spreadsheet.persistence import spreadsheet_history_manager
+        res = spreadsheet_history_manager.redo(db, dataset_id)
+        status_code = 200 if res.get('success') else 404
+        return jsonify(res), status_code
+    except Exception as e:
+        logger.error('[transform/redo] Error: %s', e, exc_info=True)
+        return jsonify({'error': str(e)}), 500

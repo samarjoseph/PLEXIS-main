@@ -53,6 +53,9 @@ class DatasetRepository:
         row_count: Optional[int] = None,
         column_count: Optional[int] = None,
         mime_type: str = "text/csv",
+        dataset_id: Optional[UUID] = None,
+        storage_account: str = "primary",
+        storage_key: Optional[str] = None,
     ) -> Dataset:
         """
         Create a new Dataset + DatasetFile (BYTEA) in a single transaction.
@@ -75,7 +78,7 @@ class DatasetRepository:
         Returns:
             Newly created Dataset (with DatasetFile populated)
         """
-        dataset_id = uuid.uuid4()
+        dataset_id = dataset_id or uuid.uuid4()
 
         # gzip compress the file content
         compressed = gzip.compress(file_bytes)
@@ -86,6 +89,9 @@ class DatasetRepository:
             user_id=user_id,
             original_filename=original_filename,
             stored_filename=original_filename,
+            storage_account=storage_account,
+            storage_key=storage_key,
+            current_revision=0,
             mime_type=mime_type,
             file_size=len(file_bytes),
             file_hash=file_hash,
